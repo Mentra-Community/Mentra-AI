@@ -46,14 +46,26 @@ Utilize available tools when necessary and adhere to the following guidelines:
 8. If the query is empty, nonsensical, or useless, return Final Answer: "No query provided." with Needs Camera: false
 9. For context, the UTC time and date is ${new Date().toUTCString()}, but for anything involving dates or times, make sure to response using the user's local time zone. If a tool needs a date or time input, convert it from the user's local time to UTC before passing it to a tool. Always think at length with the Internal_Thinking tool when working with dates and times to make sure you are using the correct time zone and offset.{timezone_context}
 10. If the user's query is location-specific (e.g., weather, news, events, or anything that depends on place), always use the user's current location context to provide the most relevant answer.
+11. Use the conversation history below to maintain context across queries. Reference previous exchanges when relevant (e.g., "it", "that", "the place we talked about").
 
 {location_context}
 {notifications_context}
+{conversation_history}
 {photo_context}
 Tools:
 {tool_names}
 
 Remember to always include both the Final Answer: and Needs Camera: markers in your final response.`;
+
+// Conversation memory configuration
+const MAX_CONVERSATION_HISTORY = 10; // Keep last 10 exchanges (20 messages)
+const MAX_CONVERSATION_AGE_MS = 30 * 60 * 1000; // 30 minutes
+
+interface ConversationTurn {
+  query: string;
+  response: string;
+  timestamp: number;
+}
 
 export class MiraAgent implements Agent {
   public agentId = "mira_agent";
@@ -65,6 +77,7 @@ export class MiraAgent implements Agent {
   private appManagementAgent: AppManagementAgent;
 
   public messages: BaseMessage[] = [];
+  private conversationHistory: ConversationTurn[] = [];
 
   private locationContext: {
     city: string;
@@ -104,6 +117,61 @@ export class MiraAgent implements Agent {
       new ThinkingTool(),
       new Calculator(),
     ];
+  }
+
+  /**
+   * Add a conversation turn to history
+   */
+  private addToConversationHistory(query: string, response: string): void {
+    this.conversationHistory.push({
+      query,
+      response,
+      timestamp: Date.now()
+    });
+
+    // Clean up old conversations
+    this.cleanupConversationHistory();
+  }
+
+  /**
+   * Clean up old conversation history based on age and count limits
+   */
+  private cleanupConversationHistory(): void {
+    const now = Date.now();
+
+    // Remove conversations older than MAX_CONVERSATION_AGE_MS
+    this.conversationHistory = this.conversationHistory.filter(
+      turn => now - turn.timestamp < MAX_CONVERSATION_AGE_MS
+    );
+
+    // Keep only the last MAX_CONVERSATION_HISTORY turns
+    if (this.conversationHistory.length > MAX_CONVERSATION_HISTORY) {
+      this.conversationHistory = this.conversationHistory.slice(-MAX_CONVERSATION_HISTORY);
+    }
+  }
+
+  /**
+   * Format conversation history for context in prompts
+   */
+  private formatConversationHistory(): string {
+    if (this.conversationHistory.length === 0) {
+      return '';
+    }
+
+    const historyText = this.conversationHistory
+      .map((turn, idx) => {
+        return `[${idx + 1}] User: ${turn.query}\nMira: ${turn.response}`;
+      })
+      .join('\n\n');
+
+    return `\nRecent conversation history:\n${historyText}\n`;
+  }
+
+  /**
+   * Clear conversation history (useful for new sessions or explicit reset)
+   */
+  public clearConversationHistory(): void {
+    this.conversationHistory = [];
   }
 
     /**
@@ -234,14 +302,17 @@ export class MiraAgent implements Agent {
     const toolNames = this.agentTools.map((tool) => tool.name + ": " + tool.description || "");
 
     const photoContext = hasPhoto
-      ? "IMPORTANT: Your role is to classify the query and provide an answer ONLY if it's non-visual. For the 'Needs Camera' flag: set it to TRUE if the query requires visual input from the camera (e.g., 'what is this?', 'how many fingers?', 'what color?', 'describe what you see', 'read this'). Set it to FALSE for general knowledge queries (e.g., 'weather', 'time', 'calculations', 'facts'). If Needs Camera is TRUE - the image analysis will handle it."
+      ? "IMPORTANT: Your role is to classify the query and determine if it requires visual input. For the 'Needs Camera' flag: set it to TRUE if the query requires visual input from the camera (e.g., 'what is this?', 'how many fingers?', 'what color?', 'describe what you see', 'read this'). Set it to FALSE for general knowledge queries (e.g., 'weather', 'time', 'calculations', 'facts'). If Needs Camera is TRUE, provide a brief acknowledgment as your Final Answer (e.g., 'I'll analyze that for you.') - the image analysis will provide the detailed response."
       : "";
+
+    const conversationHistoryText = this.formatConversationHistory();
 
     const systemPrompt = systemPromptBlueprint
       .replace("{tool_names}", toolNames.join("\n"))
       .replace("{location_context}", locationInfo)
       .replace("{notifications_context}", notificationsContext)
       .replace("{timezone_context}", localtimeContext)
+      .replace("{conversation_history}", conversationHistoryText)
       .replace("{photo_context}", photoContext);
 
     const messages: BaseMessage[] = [new SystemMessage(systemPrompt), new HumanMessage(query)];
@@ -430,10 +501,15 @@ export class MiraAgent implements Agent {
           console.log(`⏱️  [+${totalDuration}ms] 📸 RETURNING IMAGE-BASED RESPONSE`);
           console.log(`⏱️  Total processing time: ${(totalDuration / 1000).toFixed(2)}s`);
           console.log(`${"=".repeat(60)}\n`);
-          return imageAnalysisResult || textResult.answer;
+
+          const finalResponse = imageAnalysisResult || textResult.answer;
+          // Save to conversation history
+          this.addToConversationHistory(query, finalResponse);
+          return finalResponse;
         } catch (error) {
           console.error('Error in image analysis:', error);
           // Fall back to text answer if image analysis fails
+          this.addToConversationHistory(query, textResult.answer);
           return textResult.answer;
         }
       }
@@ -444,6 +520,9 @@ export class MiraAgent implements Agent {
       console.log(`⏱️  [+${totalDuration}ms] 📝 RETURNING TEXT-BASED RESPONSE`);
       console.log(`⏱️  Total processing time: ${(totalDuration / 1000).toFixed(2)}s`);
       console.log(`${"=".repeat(60)}\n`);
+
+      // Save to conversation history
+      this.addToConversationHistory(query, textResult.answer);
       return textResult.answer;
     } catch (err) {
       const errorTime = Date.now();

@@ -895,6 +895,7 @@ function getCleanServerUrl(rawUrl: string | undefined): string {
 class MiraServer extends AppServer {
   private transcriptionManagers = new Map<string, TranscriptionManager>();
   private agentPerSession = new Map<string, MiraAgent>();
+  private agentPerUser = new Map<string, MiraAgent>(); // Persistent agents per user
   private chatManager: ChatManager;
 
   constructor(options: any) {
@@ -1026,20 +1027,31 @@ class MiraServer extends AppServer {
    */
   protected async onSession(session: AppSession, sessionId: string, userId: string): Promise<void> {
     const logger = session.logger.child({ service: 'Mira.MiraServer' });
-    logger.info(`Setting up Mira service for session ${sessionId}, user ${userId}`); 
+    logger.info(`Setting up Mira service for session ${sessionId}, user ${userId}`);
 
     const cleanServerUrl = getCleanServerUrl(session.getServerUrl());
-    const agent = new MiraAgent(cleanServerUrl, userId);
-    // Start fetching tools asynchronously without blocking
-    getAllToolsForUser(cleanServerUrl, userId).then(tools => {
-      // Append tools to agent when they're available
-      if (tools.length > 0) {
-        agent.agentTools.push(...tools);
-        logger.info(`Added ${tools.length} user tools to agent for user ${userId}`);
-      }
-    }).catch(error => {
-      logger.error(error, `Failed to load tools for user ${userId}:`);
-    });
+
+    // Reuse existing agent for this user or create a new one
+    let agent = this.agentPerUser.get(userId);
+    if (!agent) {
+      logger.info(`Creating new MiraAgent for user ${userId}`);
+      agent = new MiraAgent(cleanServerUrl, userId);
+      this.agentPerUser.set(userId, agent);
+
+      // Start fetching tools asynchronously without blocking
+      getAllToolsForUser(cleanServerUrl, userId).then(tools => {
+        // Append tools to agent when they're available
+        if (tools.length > 0) {
+          agent!.agentTools.push(...tools);
+          logger.info(`Added ${tools.length} user tools to agent for user ${userId}`);
+        }
+      }).catch(error => {
+        logger.error(error, `Failed to load tools for user ${userId}:`);
+      });
+    } else {
+      logger.info(`Reusing existing MiraAgent for user ${userId} (conversation history preserved)`);
+    }
+
     this.agentPerSession.set(sessionId, agent);
 
     // Create a transcription manager for this session — this is what essentially connects the user's session input to the backend.
