@@ -234,7 +234,7 @@ export class MiraAgent implements Agent {
     const toolNames = this.agentTools.map((tool) => tool.name + ": " + tool.description || "");
 
     const photoContext = hasPhoto
-      ? "IMPORTANT: Your role is to classify the query and provide an answer ONLY if it's non-visual. For the 'Needs Camera' flag: set it to TRUE if the query requires visual input from the camera (e.g., 'what is this?', 'how many fingers?', 'what color?', 'describe what you see', 'read this'). Set it to FALSE for general knowledge queries (e.g., 'weather', 'time', 'calculations', 'facts'). If Needs Camera is TRUE, just output a placeholder like 'Processing visual query...' as your Final Answer - the image analysis will handle it."
+      ? "IMPORTANT: Your role is to classify the query and provide an answer ONLY if it's non-visual. For the 'Needs Camera' flag: set it to TRUE if the query requires visual input from the camera (e.g., 'what is this?', 'how many fingers?', 'what color?', 'describe what you see', 'read this'). Set it to FALSE for general knowledge queries (e.g., 'weather', 'time', 'calculations', 'facts'). If Needs Camera is TRUE - the image analysis will handle it."
       : "";
 
     const systemPrompt = systemPromptBlueprint
