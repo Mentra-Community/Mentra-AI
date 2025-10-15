@@ -22,7 +22,13 @@ export async function analyzeImage(
   question: string,
   // model = "gemma-3-4b-it"
   // model = "gemma-3-12b-it"
-  model = "gemma-3-27b-it"
+  // model = "gemma-3-27b-it"
+  // model = "gemini-2.5-flash-image"
+  // model = "gemini-flash-latest"
+  model = "gemini-flash-lite-latest"
+
+
+
 
 
 ): Promise<string | null> {
