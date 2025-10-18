@@ -131,6 +131,10 @@ class TranscriptionManager {
    */
   handleTranscription(transcriptionData: any): void {
     // If a query is already being processed, ignore additional transcriptions
+
+    const transcriptionReceiveTime = Date.now();
+    console.log(`🎤 [${new Date().toISOString()}] Transcription received: "${transcriptionData.text}" (isFinal: ${transcriptionData.isFinal})`);
+
     if (this.isProcessingQuery) {
       this.logger.info(`[Session ${this.sessionId}]: Query already in progress. Ignoring transcription.`);
       return;
@@ -282,7 +286,7 @@ class TranscriptionManager {
     } else {
       //this.logger.debug("transcriptionData.isFinal: not final");
       // For non-final transcripts
-      timerDuration = 3000;
+      timerDuration = 800;
     }
 
     // Clear any existing timeout
