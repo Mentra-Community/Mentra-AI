@@ -286,7 +286,7 @@ class TranscriptionManager {
     } else {
       //this.logger.debug("transcriptionData.isFinal: not final");
       // For non-final transcripts
-      timerDuration = 800;
+      timerDuration = 2000;
     }
 
     // Clear any existing timeout
