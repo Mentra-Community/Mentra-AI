@@ -11,7 +11,7 @@ import { wrapText, TranscriptProcessor } from './utils';
 import { getAllToolsForUser } from './agents/tools/TpaTool';
 import { log } from 'console';
 import { Anim } from './utils/anim';
-import { analyzeImage } from './test/nano-banana';
+import { analyzeImage } from './utils/img-processor';
 import { ChatManager } from './chat/ChatManager';
 import express from 'express';
 
@@ -651,26 +651,6 @@ class TranscriptionManager {
       const photo = await this.getPhoto();
       console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ${photo ? '✅ Photo retrieved' : '⚪ No photo available'}`);
 
-      // Send user query and photo to webview (after photo is retrieved)
-      if (this.chatManager) {
-        console.log(`\n${"=".repeat(70)}`);
-        console.log(`📱 [WEBVIEW] Sending query to webview for user: ${this.userId}`);
-        console.log(`📱 [WEBVIEW] Query: "${query}"`);
-
-        // Convert PhotoData to base64 if available
-        let photoBase64: string | undefined;
-        if (photo) {
-          photoBase64 = `data:${photo.mimeType};base64,${photo.buffer.toString('base64')}`;
-          console.log(`📱 [WEBVIEW] 📷 Including photo (${photo.mimeType}, ${photo.size} bytes)`);
-        }
-
-        console.log(`${"=".repeat(70)}\n`);
-        this.chatManager.addUserMessage(this.userId, query, photoBase64);
-        this.chatManager.setProcessing(this.userId, true);
-      } else {
-        console.warn(`⚠️  [WEBVIEW] ChatManager not available - webview won't receive updates`);
-      }
-
       const agentStartTime = Date.now();
       console.log(`⏱️  [+${agentStartTime - processQueryStartTime}ms] 🤖 Invoking MiraAgent.handleContext...`);
 
@@ -681,11 +661,51 @@ class TranscriptionManager {
       const agentEndTime = Date.now();
       console.log(`⏱️  [+${agentEndTime - processQueryStartTime}ms] ✅ MiraAgent completed (took ${agentEndTime - agentStartTime}ms)`);
 
+      // Extract answer and needsCamera flag from response
+      let finalAnswer: string;
+      let needsCamera = false;
+
+      if (agentResponse && typeof agentResponse === 'object' && 'answer' in agentResponse) {
+        finalAnswer = agentResponse.answer;
+        needsCamera = agentResponse.needsCamera || false;
+      } else if (typeof agentResponse === 'string') {
+        // Backward compatibility for string responses
+        finalAnswer = agentResponse;
+      } else {
+        finalAnswer = agentResponse;
+      }
+
+      console.log(`🎯 needsCamera flag: ${needsCamera}`);
+
+      // Send user query to webview with photo only if camera was needed
+      if (this.chatManager) {
+        console.log(`\n${"=".repeat(70)}`);
+        console.log(`📱 [WEBVIEW] Sending query to webview for user: ${this.userId}`);
+        console.log(`📱 [WEBVIEW] Query: "${query}"`);
+
+        // Convert PhotoData to base64 only if camera is needed
+        let photoBase64: string | undefined;
+        if (needsCamera && photo) {
+          photoBase64 = `data:${photo.mimeType};base64,${photo.buffer.toString('base64')}`;
+          console.log(`📱 [WEBVIEW] 📷 Including photo (${photo.mimeType}, ${photo.size} bytes) - camera was needed`);
+        } else if (needsCamera && !photo) {
+          console.log(`📱 [WEBVIEW] ⚠️ Camera was needed but no photo available`);
+        } else {
+          console.log(`📱 [WEBVIEW] 📷 Skipping photo - camera not needed for this query`);
+        }
+
+        console.log(`${"=".repeat(70)}\n`);
+        this.chatManager.addUserMessage(this.userId, query, photoBase64);
+        this.chatManager.setProcessing(this.userId, true);
+      } else {
+        console.warn(`⚠️  [WEBVIEW] ChatManager not available - webview won't receive updates`);
+      }
+
       // analyzeImage(); // Removed - already called in MiraAgent.handleContext
       anim.stop(); // animiation stop
       isRunning = false;
 
-      if (!agentResponse) {
+      if (!finalAnswer) {
         console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ⚠️  No agent response received`);
         this.logger.info("No insight found");
         const errorMsg = "Sorry, I couldn't find an answer to that.";
@@ -696,7 +716,7 @@ class TranscriptionManager {
           this.chatManager.setProcessing(this.userId, false);
           this.chatManager.addAssistantMessage(this.userId, errorMsg);
         }
-      } else if (agentResponse === GIVE_APP_CONTROL_OF_TOOL_RESPONSE) {
+      } else if (finalAnswer === GIVE_APP_CONTROL_OF_TOOL_RESPONSE) {
         console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 🎮 App control handed over to tool`);
         // the app is now in control, so don't do anything
         if (this.chatManager) {
@@ -704,9 +724,9 @@ class TranscriptionManager {
         }
       } else {
         let handled = false;
-        if (typeof agentResponse === 'string') {
+        if (typeof finalAnswer === 'string') {
           try {
-            const parsed = JSON.parse(agentResponse);
+            const parsed = JSON.parse(finalAnswer);
 
             // Generic event handler for tool outputs
             if (parsed && parsed.event) {
@@ -727,16 +747,16 @@ class TranscriptionManager {
         if (!handled) {
           const displayStartTime = Date.now();
           console.log(`⏱️  [+${displayStartTime - processQueryStartTime}ms] 📱 Displaying response to user...`);
-          this.showOrSpeakText(agentResponse);
+          this.showOrSpeakText(finalAnswer);
 
           // Send response to webview
           if (this.chatManager) {
             console.log(`\n${"=".repeat(70)}`);
             console.log(`📱 [WEBVIEW] Sending response to webview for user: ${this.userId}`);
-            console.log(`📱 [WEBVIEW] Response: "${agentResponse.substring(0, 100)}${agentResponse.length > 100 ? '...' : ''}"`);
+            console.log(`📱 [WEBVIEW] Response: "${finalAnswer.substring(0, 100)}${finalAnswer.length > 100 ? '...' : ''}"`);
             console.log(`${"=".repeat(70)}\n`);
             this.chatManager.setProcessing(this.userId, false);
-            this.chatManager.addAssistantMessage(this.userId, agentResponse);
+            this.chatManager.addAssistantMessage(this.userId, finalAnswer);
           } else {
             console.warn(`⚠️  [WEBVIEW] ChatManager not available - webview won't receive response`);
           }

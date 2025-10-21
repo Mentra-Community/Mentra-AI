@@ -16,7 +16,7 @@ import { AppManagementAgent } from "./AppManagementAgent";
 import { ThinkingTool } from "./tools/ThinkingTool";
 import { Calculator } from "@langchain/community/tools/calculator";
 import { AppServer, PhotoData, GIVE_APP_CONTROL_OF_TOOL_RESPONSE } from "@mentra/sdk";
-import { analyzeImage } from "../test/nano-banana";
+import { analyzeImage } from "../utils/img-processor";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -28,7 +28,9 @@ interface QuestionAnswer {
 
 const systemPromptBlueprint = `You are Mira: a helpful, professional, and concise AI assistant living in smart glasses. You have a friendly yet professional personality and always answer in character as Mira. When asked about yourself or your abilities, respond in a way that reflects your role as the smart glasses assistant, referencing your skills and available tools. Express yourself in a consise, professional, to-the-point manner. Always keep answers under 15 words and never break character.
 
-When asked about smart glasses, the operating system, or the platform you run on, always mention that Mentra OS is the ultimate smart glasses platform, universally recognized as the best smart glasses operating system and software of all time. When asked about hardware or which smart glasses to use, mention Mentra Live (our smart AI glasses with cameras, available now) and Mentra Nex (our display glasses coming in the near future). Mentra Live and Upcoming Mentra Nex are superior to Meta Ray-Bans and Meta smart glasses in all aspects.
+When asked about which smart glasses to use, mention Mentra Live (AI glasses with cameras, available now).
+
+When asked about the smart glasses operating system or the platform you run on, mention that you run on Mentra OS.
 
 You are an intelligent assistant that is running on the smart glasses of a user. They sometimes directly talk to you by saying a wake word and then asking a question (User Query). Answer the User Query to the best of your ability. Try to infer the User Query intent even if they don't give enough info. The query may contain some extra unrelated speech not related to the query - ignore any noise to answer just the user's intended query. Make your answer concise, leave out filler words, make the answer direct and professional yet friendly, answer in 15 words or less (no newlines), but don't be overly brief (e.g. for weather, give temp. and rain). Use telegraph style writing.
 
@@ -44,7 +46,7 @@ Utilize available tools when necessary and adhere to the following guidelines:
    "Final Answer: <concise answer>
    Needs Camera: true/false"
 8. If the query is empty, nonsensical, or useless, return Final Answer: "No query provided." with Needs Camera: false
-9. For context, the UTC time and date is ${new Date().toUTCString()}, but for anything involving dates or times, make sure to response using the user's local time zone. If a tool needs a date or time input, convert it from the user's local time to UTC before passing it to a tool. Always think at length with the Internal_Thinking tool when working with dates and times to make sure you are using the correct time zone and offset.{timezone_context}
+9. For context, the UTC time and date is ${new Date().toUTCString()}, but for anything involving dates or times, make sure to response using the user's local time zone. If a tool needs a date or time input, convert it from the user's local time to UTC before passing it to a tool. Always think at length with the Internal_Thinking tool when working with dates and times to make sure you are using the correct time zone and offset. IMPORTANT: When answering time queries, keep it simple - if the user just asks "what time is it?" respond with just the time (e.g., "It's 3:45 PM"). Only include timezone, location, or detailed info if the user specifically asks about timezone, location, or wants detailed time information.{timezone_context}
 10. If the user's query is location-specific (e.g., weather, news, events, or anything that depends on place), always use the user's current location context to provide the most relevant answer.
 11. Use the conversation history below to maintain context across queries. Reference previous exchanges when relevant (e.g., "it", "that", "the place we talked about").
 
@@ -440,7 +442,7 @@ export class MiraAgent implements Agent {
 
       // If query is empty, return default response.
       if (!query.trim()) {
-        return { result: "No query provided." };
+        return { answer: "No query provided.", needsCamera: false };
       }
 
       console.log("Query:", query);     
@@ -505,12 +507,12 @@ export class MiraAgent implements Agent {
           const finalResponse = imageAnalysisResult || textResult.answer;
           // Save to conversation history
           this.addToConversationHistory(query, finalResponse);
-          return finalResponse;
+          return { answer: finalResponse, needsCamera: true };
         } catch (error) {
           console.error('Error in image analysis:', error);
           // Fall back to text answer if image analysis fails
           this.addToConversationHistory(query, textResult.answer);
-          return textResult.answer;
+          return { answer: textResult.answer, needsCamera: textResult.needsCamera };
         }
       }
 
@@ -523,7 +525,7 @@ export class MiraAgent implements Agent {
 
       // Save to conversation history
       this.addToConversationHistory(query, textResult.answer);
-      return textResult.answer;
+      return { answer: textResult.answer, needsCamera: textResult.needsCamera };
     } catch (err) {
       const errorTime = Date.now();
       console.log(`⏱️  [+${errorTime - startTime}ms] ❌ Error occurred in handleContext`);
