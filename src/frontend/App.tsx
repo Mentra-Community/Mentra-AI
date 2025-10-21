@@ -1,6 +1,7 @@
 import React from 'react';
 import { useMentraAuth } from '@mentra/react';
-import ChatInterface from './components/ChatInterface';
+import ChatInterface from './screen/ChatInterface';
+import AnimatedLogo from './components/AnimeLogo';
 
 /**
  * Main App component that manages authentication state and renders
@@ -9,12 +10,12 @@ import ChatInterface from './components/ChatInterface';
 function App(): React.JSX.Element {
   const { userId, isLoading, error, isAuthenticated } = useMentraAuth();
 
-  // Handle loading state
+  // Handle loading state with animated logo
   if (isLoading) {
     return (
       <div className="min-h-screen flex flex-col bg-black">
         <div className="flex flex-col items-center justify-center min-h-screen gap-4">
-          <div className="w-10 h-10 border-3 border-gray-700 border-t-purple-500 rounded-full animate-spin"></div>
+          <AnimatedLogo />
           <p className="text-gray-400">Loading authentication...</p>
         </div>
       </div>

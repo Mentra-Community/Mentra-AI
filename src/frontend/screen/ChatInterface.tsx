@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Sparkles, Menu, X, Search, Plus, MessageSquare, Sun, Moon } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import AnimatedLogo from '../components/AnimeLogo';
+
 
 interface Message {
   id: string;
@@ -292,7 +294,7 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
           <motion.div
             animate={{
               opacity: messages.length === 0 ? 1 : 0.2
-            }}
+            }} 
             transition={{ duration: 0.8, ease: 'easeInOut' }}
             className="absolute inset-0 pointer-events-none"
           >
@@ -345,16 +347,37 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
             )}
           </AnimatePresence>
 
-          {/* Center Text - Fades out when messages appear */}
-          <AnimatePresence>
+          {/* Animated Logo - Shows centered when no messages, fades away when conversation starts */}
+
+
+          {/* Animated Logo and Text - Moves to top after loading, then fades out when messages appear */}
+          <AnimatePresence mode="wait">
             {messages.length === 0 && (
               <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: -20, transition: { duration: 0.5, ease: 'easeInOut' } }}
-                transition={{ duration: 0.6, ease: 'easeOut' }}
-                className="absolute inset-0 flex items-center justify-center px-6 z-10"
+                key="welcome-screen"
+                initial={{ opacity: 0, y: 0 }}
+                animate={{
+                  opacity: 1,
+                  y: [0, 0, -30],
+                  transition: {
+                    opacity: { duration: 0.5 },
+                    y: { duration: 1.2, times: [0, 0.75, 1], ease: [0.4, 0, 0.2, 1] }
+                  }
+                }}
+                exit={{ opacity: 0, y: -20, transition: { duration: 0.4, ease: 'easeInOut' } }}
+                className="absolute inset-0 flex flex-col items-center justify-center px-6 z-10"
               >
+                {/* Animated Logo */}
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.5, ease: 'easeOut' }}
+                  className="mb-0"
+                >
+                  <AnimatedLogo key={`logo-${messages.length}`} size="medium" animate={true} color={isDarkMode ? '#9333ea' : '#7c3aed'} />
+                </motion.div>
+
+                {/* Text Content */}
                 <div className="flex flex-col items-center px-4">
                   <motion.h2
                     className={`text-2xl sm:text-3xl md:text-4xl lg:text-5xl xl:text-6xl font-bold mb-4 text-center ${
@@ -362,19 +385,19 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
                     }`}
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.8, ease: 'easeOut' }}
+                    transition={{ duration: 0.4, ease: 'easeOut', delay: 0.9 }}
                   >
                     How can I help you?
                   </motion.h2>
                   <motion.p
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.8, delay: 0.3, ease: 'easeOut' }}
-                    className={`text-sm sm:text-base md:text-lg text-center max-w-md ${
+                    transition={{ duration: 0.4, delay: 1.1, ease: 'easeOut' }}
+                    className={`text-[12px] sm:text-base md:text-lg text-center max-w-md ${
                       isDarkMode ? 'text-purple-300/70' : 'text-purple-700/70'
                     }`}
                   >
-                    Speak into your microphone...
+                    Speak to your glasses
                   </motion.p>
                 </div>
               </motion.div>
@@ -655,6 +678,7 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
           }
         }
       `}</style>
+      
     </div>
   );
 }
