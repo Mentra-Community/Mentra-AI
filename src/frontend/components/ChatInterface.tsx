@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { MessageSquare, Sparkles } from 'lucide-react';
+import { Sparkles, Menu, X, Search, Plus, MessageSquare, Clock } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface Message {
   id: string;
@@ -24,8 +25,13 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
   const [messages, setMessages] = useState<Message[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [displayedText, setDisplayedText] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const sseRef = useRef<EventSource | null>(null);
+
+  const fullText = 'How can I help you?';
 
   console.log('[ChatInterface] Component rendered. State:', {
     userId,
@@ -33,6 +39,23 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
     messageCount: messages.length,
     isProcessing,
   });
+
+  // Animated text effect
+  useEffect(() => {
+    if (messages.length === 0) {
+      let index = 0;
+      const timer = setInterval(() => {
+        if (index <= fullText.length) {
+          setDisplayedText(fullText.slice(0, index));
+          index++;
+        } else {
+          clearInterval(timer);
+        }
+      }, 100);
+
+      return () => clearInterval(timer);
+    }
+  }, [messages.length]);
 
   // Scroll to bottom of messages
   const scrollToBottom = () => {
@@ -132,96 +155,301 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
     };
   }, [userId, recipientId]);
 
+  // Create conversation history from messages
+  const conversationHistory = messages
+    .reduce((acc: { id: string; title: string; date: string }[], msg) => {
+      // Group messages by date
+      const dateStr = msg.timestamp.toLocaleDateString();
+      const existing = acc.find(conv => conv.date === dateStr);
+      if (!existing && msg.content) {
+        const title = msg.content.slice(0, 30) + (msg.content.length > 30 ? '...' : '');
+        const now = new Date();
+        const msgDate = new Date(msg.timestamp);
+        const diffHours = Math.floor((now.getTime() - msgDate.getTime()) / (1000 * 60 * 60));
+
+        let dateLabel;
+        if (diffHours < 1) dateLabel = 'Just now';
+        else if (diffHours < 24) dateLabel = `${diffHours} hours ago`;
+        else if (diffHours < 48) dateLabel = 'Yesterday';
+        else dateLabel = dateStr;
+
+        acc.push({
+          id: msg.id,
+          title,
+          date: dateLabel
+        });
+      }
+      return acc;
+    }, [])
+    .slice(-5); // Keep last 5 conversations
+
+  const filteredConversations = conversationHistory.filter(conv =>
+    conv.title.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   return (
-    <div className="flex flex-col h-screen bg-black text-white font-sans">
-      {/* Header */}
-      <div className="flex items-center justify-center p-4 border-b border-gray-800">
-        <div className="flex items-center gap-2">
-          <Sparkles size={20} className="text-purple-400" />
-          <span className="font-semibold">Mira</span>
+    <div className="h-screen flex bg-black overflow-hidden">
+      {/* Sidebar */}
+      <div
+        className={`fixed inset-y-0 left-0 z-50 w-72 bg-black/95 backdrop-blur-xl border-r border-purple-500/10 transform transition-transform duration-300 ${
+          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+        } lg:relative lg:translate-x-0 flex flex-col`}
+      >
+        {/* Sidebar Header */}
+        <div className="p-3 border-b border-purple-500/10">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-medium text-purple-200/70 flex items-center gap-2">
+              <MessageSquare className="w-4 h-4 text-purple-400/60" />
+              Conversations
+            </h2>
+            <button
+              onClick={() => setSidebarOpen(false)}
+              className="lg:hidden p-1 hover:bg-purple-500/10 rounded transition-colors"
+            >
+              <X className="w-4 h-4 text-purple-300/70" />
+            </button>
+          </div>
+
+          {/* New Chat Button - Disabled/Under Construction */}
+          <button
+            disabled
+            className="w-full bg-purple-600/10 text-purple-200/40 rounded-lg py-2 px-3 flex items-center justify-center gap-2 text-sm border border-purple-500/10 cursor-not-allowed relative"
+            title="Under construction"
+          >
+            <Plus className="w-4 h-4" />
+            New Chat
+            <span className="absolute -top-1 -right-1 text-[10px] bg-yellow-500/20 text-yellow-300/70 px-1.5 py-0.5 rounded-full border border-yellow-500/30">
+              Soon
+            </span>
+          </button>
+        </div>
+
+        {/* Search Bar - Disabled/Under Construction */}
+        <div className="p-3 border-b border-purple-500/10">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 text-purple-400/30" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search (coming soon)..."
+              disabled
+              className="w-full bg-gray-900/20 border border-purple-500/10 rounded-lg py-1.5 pl-8 pr-3 text-sm text-purple-100/40 placeholder-purple-400/30 cursor-not-allowed"
+            />
+          </div>
+        </div>
+
+        {/* Conversation History */}
+        <div className="flex-1 overflow-y-auto p-2 space-y-1">
+          {filteredConversations.length > 0 ? (
+            filteredConversations.map((conv) => (
+              <button
+                key={conv.id}
+                className="w-full text-left p-2.5 rounded-lg hover:bg-purple-500/10 transition-all group"
+              >
+                <div className="flex items-start gap-2">
+                  <Clock className="w-3.5 h-3.5 text-purple-400/50 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-purple-100/70 text-sm truncate group-hover:text-purple-200/90 transition-colors">
+                      {conv.title}
+                    </p>
+                    <p className="text-purple-400/40 text-xs mt-0.5">
+                      {conv.date}
+                    </p>
+                  </div>
+                </div>
+              </button>
+            ))
+          ) : (
+            <div className="text-center py-8 text-purple-400/40 text-xs">
+              No conversations found
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Chat Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-6">
-        {messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-gray-500 space-y-2">
-            <MessageSquare size={48} className="text-gray-700" />
-            <p className="text-lg">No conversation yet</p>
-            <p className="text-sm">Start talking to Mira through your device</p>
+      {/* Overlay for mobile */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/80 z-40 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        ></div>
+      )}
+
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col bg-gradient-to-b from-black via-gray-950 to-black">
+        {/* Header */}
+        <header className="bg-gray-950/50 border-b border-purple-500/20 backdrop-blur-lg px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="lg:hidden p-2 hover:bg-purple-500/10 rounded-lg transition-colors"
+            >
+              <Menu className="w-5 h-5 text-purple-300" />
+            </button>
+            <div className="relative">
+              <Sparkles className="w-6 h-6 text-purple-400" />
+              <div className="absolute -top-1 -right-1 w-2 h-2 bg-purple-400 rounded-full animate-pulse"></div>
+            </div>
+            <h1 className="text-xl font-semibold text-purple-100">
+              Mira
+            </h1>
           </div>
-        ) : (
-          <div className="max-w-3xl mx-auto space-y-6">
-            {messages.map((message) => {
-              const isOwnMessage = message.senderId === userId;
+        </header>
+
+        {/* Main Content Area */}
+        <div className="flex-1 overflow-y-auto relative">
+          {/* Stars in background - Always visible, subtle */}
+          <div className="absolute inset-0 pointer-events-none">
+            {[...Array(50)].map((_, i) => {
+              const randomLeft = Math.random() * 100;
+              const randomTop = Math.random() * 100;
+              const randomDelay = Math.random() * 3;
+              const randomDuration = 2 + Math.random() * 2;
               return (
-                <div key={message.id} className="flex gap-3">
-                  {/* Avatar */}
-                  <div className="flex-shrink-0">
-                    {isOwnMessage ? (
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-sm font-semibold">
-                        U
+                <div
+                  key={i}
+                  className="absolute w-0.5 h-0.5 bg-purple-300/10 rounded-full"
+                  style={{
+                    left: `${randomLeft}%`,
+                    top: `${randomTop}%`,
+                    animation: `twinkle ${randomDuration}s ease-in-out ${randomDelay}s infinite`,
+                  }}
+                />
+              );
+            })}
+          </div>
+
+          {/* Background glow effects - Fades out when messages appear */}
+          <AnimatePresence>
+            {messages.length === 0 && (
+              <>
+                <motion.div
+                  initial={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.8, ease: 'easeInOut' }}
+                  className="absolute inset-0 flex items-center justify-center pointer-events-none"
+                >
+                  <div className="w-96 h-96 bg-purple-600/10 rounded-full blur-3xl animate-pulse"></div>
+                </motion.div>
+                <motion.div
+                  initial={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.8, ease: 'easeInOut' }}
+                  className="absolute inset-0 flex items-center justify-center pointer-events-none"
+                >
+                  <div className="w-64 h-64 bg-purple-500/20 rounded-full blur-2xl" style={{ animation: 'pulse 3s ease-in-out infinite' }}></div>
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
+
+          {/* Center Text - Fades out when messages appear */}
+          <AnimatePresence>
+            {messages.length === 0 && (
+              <motion.div
+                initial={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                transition={{ duration: 0.5, ease: 'easeInOut' }}
+                className="absolute inset-0 flex items-center justify-center px-6 z-10"
+              >
+                <div className="flex flex-col items-center px-4">
+                  <h2 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl xl:text-7xl font-bold mb-4 text-purple-100 text-center">
+                    {displayedText}
+                    <span className="animate-pulse">|</span>
+                  </h2>
+                  <p className="text-base sm:text-lg md:text-xl text-purple-300/70 text-center max-w-md">
+                    Speak into your microphone...
+                  </p>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Chat Messages - Fades in when messages appear */}
+          {messages.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, ease: 'easeOut' }}
+              className="px-4 py-6 relative z-20"
+            >
+              <div className="max-w-3xl mx-auto space-y-6">
+                {messages.map((message, index) => {
+                  const isOwnMessage = message.senderId === userId;
+                  return (
+                    <motion.div
+                      key={message.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.3, delay: index * 0.05 }}
+                      className="flex gap-3"
+                    >
+                      {/* Avatar */}
+                      <div className="flex-shrink-0">
+                        {isOwnMessage ? (
+                          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-sm font-semibold">
+                            U
+                          </div>
+                        ) : (
+                          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-600 to-fuchsia-600 flex items-center justify-center">
+                            <MessageSquare size={18} />
+                          </div>
+                        )}
                       </div>
-                    ) : (
+
+                      {/* Message Content */}
+                      <div className="flex-1 pt-1">
+                        <div className="text-sm font-semibold mb-2 text-purple-300/90">
+                          {isOwnMessage ? 'You' : 'Mira'}
+                        </div>
+                        {message.image && (
+                          <img
+                            src={message.image}
+                            alt="Message context"
+                            className="rounded-lg mb-3 max-w-xs h-auto cursor-pointer hover:opacity-90 transition-opacity border border-purple-500/20"
+                            onClick={() => setZoomedImage(message.image!)}
+                          />
+                        )}
+                        <div className="text-purple-100/80 leading-relaxed whitespace-pre-line">
+                          {message.content}
+                        </div>
+                        <div className="text-xs text-purple-400/40 mt-2">
+                          {message.timestamp.toLocaleTimeString()}
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+
+                {/* Processing Indicator */}
+                {isProcessing && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="flex gap-3"
+                  >
+                    <div className="flex-shrink-0">
                       <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-600 to-fuchsia-600 flex items-center justify-center">
                         <MessageSquare size={18} />
                       </div>
-                    )}
-                  </div>
+                    </div>
+                    <div className="flex-1 pt-1">
+                      <div className="text-sm font-semibold mb-2 text-purple-300/90">Mira</div>
+                      <div className="flex space-x-2">
+                        <div className="w-2 h-2 bg-purple-400/60 rounded-full animate-bounce"></div>
+                        <div className="w-2 h-2 bg-purple-400/60 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                        <div className="w-2 h-2 bg-purple-400/60 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
 
-                  {/* Message Content */}
-                  <div className="flex-1 pt-1">
-                    <div className="text-sm font-semibold mb-2 text-gray-300">
-                      {isOwnMessage ? 'You' : 'Mira'}
-                    </div>
-                    {message.image && (
-                      <img
-                        src={message.image}
-                        alt="Message context"
-                        className="rounded-lg mb-3 max-w-xs h-auto cursor-pointer hover:opacity-90 transition-opacity"
-                        onClick={() => setZoomedImage(message.image!)}
-                      />
-                    )}
-                    <div className="text-gray-100 leading-relaxed whitespace-pre-line">
-                      {message.content}
-                    </div>
-                    <div className="text-xs text-gray-500 mt-2">
-                      {message.timestamp.toLocaleTimeString()}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-
-            {/* Processing Indicator */}
-            {isProcessing && (
-              <div className="flex gap-3">
-                <div className="flex-shrink-0">
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-600 to-fuchsia-600 flex items-center justify-center">
-                    <MessageSquare size={18} />
-                  </div>
-                </div>
-                <div className="flex-1 pt-1">
-                  <div className="text-sm font-semibold mb-2 text-gray-300">Mira</div>
-                  <div className="flex space-x-2">
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></div>
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                  </div>
-                </div>
+                <div ref={messagesEndRef} />
               </div>
-            )}
-
-            <div ref={messagesEndRef} />
-          </div>
-        )}
-      </div>
-
-      {/* Footer */}
-      <div className="border-t border-gray-800 p-4 bg-black">
-        <p className="text-xs text-gray-600 text-center">
-          💬 Speak to your device to interact with Mira
-        </p>
+            </motion.div>
+          )}
+        </div>
       </div>
 
       {/* Image Zoom Modal */}
@@ -248,6 +476,39 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
           </div>
         </div>
       )}
+
+      <style>{`
+        @keyframes float {
+          0%, 100% {
+            transform: translateY(0px);
+          }
+          50% {
+            transform: translateY(-10px);
+          }
+        }
+
+        @keyframes sparkle {
+          0%, 100% {
+            transform: scale(1) rotate(0deg);
+            opacity: 1;
+          }
+          50% {
+            transform: scale(1.1) rotate(5deg);
+            opacity: 0.8;
+          }
+        }
+
+        @keyframes twinkle {
+          0%, 100% {
+            opacity: 0.1;
+            transform: scale(1);
+          }
+          50% {
+            opacity: 0.3;
+            transform: scale(1.2);
+          }
+        }
+      `}</style>
     </div>
   );
 }
