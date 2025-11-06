@@ -112,6 +112,21 @@ class TranscriptionManager {
 
   private chatManager?: ChatManager;
 
+  // Continuous listening mode
+  private isContinuousMode: boolean = false;
+  private silenceTimeoutId?: NodeJS.Timeout;
+  private readonly SILENCE_TIMEOUT_MS = 15000; // 15 seconds of silence before auto-exit
+  private readonly EXIT_COMMANDS = [
+    "stop listening", "goodbye mira", "that's all", "stop", "exit",
+    "goodbye", "bye mira", "thank you mira", "thanks mira"
+  ];
+  private isSpeaking: boolean = false;
+
+  // Follow-up window mode (5-second window after answering a query)
+  private isInFollowUpWindow: boolean = false;
+  private followUpTimeoutId?: NodeJS.Timeout;
+  private readonly FOLLOW_UP_WINDOW_MS = 5000; // 5 seconds to ask follow-up without wake word
+
   constructor(session: AppSession, sessionId: string, userId: string, miraAgent: MiraAgent, serverUrl: string, chatManager?: ChatManager) {
     this.session = session;
     this.sessionId = sessionId;
@@ -124,6 +139,80 @@ class TranscriptionManager {
     this.logger = session.logger.child({ service: 'Mira.TranscriptionManager' });
     // Initialize subscription state based on setting
     this.initTranscriptionSubscription();
+  }
+
+  /**
+   * Check if the text contains an exit command
+   */
+  private containsExitCommand(text: string): boolean {
+    const cleanedText = text.toLowerCase().trim();
+    return this.EXIT_COMMANDS.some(cmd => cleanedText.includes(cmd));
+  }
+
+  /**
+   * Start or restart the silence detection timer
+   */
+  private startSilenceTimer(): void {
+    // Clear any existing silence timer
+    if (this.silenceTimeoutId) {
+      clearTimeout(this.silenceTimeoutId);
+    }
+
+    this.silenceTimeoutId = setTimeout(() => {
+      this.logger.info(`[Session ${this.sessionId}]: Silence timeout reached, exiting continuous mode`);
+      this.exitContinuousMode();
+    }, this.SILENCE_TIMEOUT_MS);
+  }
+
+  /**
+   * Exit continuous listening mode
+   */
+  private exitContinuousMode(): void {
+    this.isContinuousMode = false;
+    if (this.silenceTimeoutId) {
+      clearTimeout(this.silenceTimeoutId);
+      this.silenceTimeoutId = undefined;
+    }
+    this.logger.info(`[Session ${this.sessionId}]: Exited continuous listening mode`);
+  }
+
+  /**
+   * Enter continuous listening mode
+   */
+  private enterContinuousMode(): void {
+    this.isContinuousMode = true;
+    this.logger.info(`[Session ${this.sessionId}]: Entered continuous listening mode`);
+    this.startSilenceTimer();
+  }
+
+  /**
+   * Start the follow-up window (5-second window to ask follow-up without wake word)
+   */
+  private startFollowUpWindow(): void {
+    // Clear any existing follow-up timer
+    if (this.followUpTimeoutId) {
+      clearTimeout(this.followUpTimeoutId);
+    }
+
+    this.isInFollowUpWindow = true;
+    this.logger.info(`[Session ${this.sessionId}]: Follow-up window started (${this.FOLLOW_UP_WINDOW_MS}ms)`);
+
+    this.followUpTimeoutId = setTimeout(() => {
+      this.logger.info(`[Session ${this.sessionId}]: Follow-up window expired, returning to wake word mode`);
+      this.exitFollowUpWindow();
+    }, this.FOLLOW_UP_WINDOW_MS);
+  }
+
+  /**
+   * Exit the follow-up window and return to wake word mode
+   */
+  private exitFollowUpWindow(): void {
+    this.isInFollowUpWindow = false;
+    if (this.followUpTimeoutId) {
+      clearTimeout(this.followUpTimeoutId);
+      this.followUpTimeoutId = undefined;
+    }
+    this.logger.info(`[Session ${this.sessionId}]: Exited follow-up window, back to wake word mode`);
   }
 
   /**
@@ -149,13 +238,38 @@ class TranscriptionManager {
       .trim();
     const hasWakeWord = explicitWakeWords.some(word => cleanedText.includes(word));
 
-      // Optional setting: only allow wake word within 10s after head moves down->up
-      const requireHeadUpWindow = !!this.session.settings.get<boolean>('wake_requires_head_up');
-      const now = Date.now();
-      const withinHeadWindow = now <= this.headWakeWindowUntilMs;
+    // If in continuous mode, restart the silence timer on any transcription
+    if (this.isContinuousMode) {
+      this.startSilenceTimer();
+    }
 
-      // Gate wake word if the optional mode is enabled
-      if (!this.isListeningToQuery) {
+    // If in follow-up window, check if this is substantial new speech
+    if (this.isInFollowUpWindow) {
+      // Require at least some meaningful text (not just noise/echoes)
+      const MIN_FOLLOW_UP_WORDS = 2;
+      const wordCount = transcriptionData.text.trim().split(/\s+/).filter((w: string) => w.length > 0).length;
+
+      if (wordCount < MIN_FOLLOW_UP_WORDS && !transcriptionData.isFinal) {
+        // Not enough speech yet, don't process
+        this.logger.debug(`[Follow-up] Ignoring partial transcription with ${wordCount} words`);
+        return;
+      }
+
+      // We have substantial speech, exit follow-up window to process this query
+      if (transcriptionData.text.trim().length > 0) {
+        this.exitFollowUpWindow();
+      }
+    }
+
+    // Optional setting: only allow wake word within 10s after head moves down->up
+    const requireHeadUpWindow = !!this.session.settings.get<boolean>('wake_requires_head_up');
+    const now = Date.now();
+    const withinHeadWindow = now <= this.headWakeWindowUntilMs;
+
+    // Gate wake word if the optional mode is enabled
+    if (!this.isListeningToQuery) {
+      // In continuous mode OR follow-up window, skip wake word requirement
+      if (!this.isContinuousMode && !this.isInFollowUpWindow) {
         if (!hasWakeWord) {
           return;
         }
@@ -165,6 +279,7 @@ class TranscriptionManager {
           return;
         }
       }
+    }
 
     // if we have a photo and it's older than 5 seconds, delete it
     if (this.activePhotos.has(this.sessionId)) {
@@ -220,6 +335,9 @@ class TranscriptionManager {
           this.logger.debug('Start listening audio failed:', err);
         });
       }
+
+      // Note: Continuous mode is no longer auto-enabled
+      // The system will use a 5-second follow-up window after each query instead
       try {
         this.session.location.getLatestLocation({accuracy: "high"}).then(location => {
           if (location) {
@@ -255,8 +373,8 @@ class TranscriptionManager {
 
 
 
-    // Remove wake word for display
-    const displayText = this.removeWakeWord(text);
+    // Remove wake word for display (only if not in continuous mode)
+    const displayText = this.isContinuousMode ? text : this.removeWakeWord(text);
     // Only show 'Listening...' if there is no text after the wake word and nothing has been shown yet
     if (displayText.trim().length === 0) {
       // Show 'Listening...' only if the last shown text was not 'Listening...'
@@ -579,6 +697,10 @@ class TranscriptionManager {
 
     const rawCombinedText = transcriptionResponse.segments.map((segment: any) => segment.text).join(' ');
 
+    console.log(`📝 [Transcript] Raw text from backend: "${rawCombinedText}"`);
+    console.log(`📝 [Transcript] Segments count: ${transcriptionResponse.segments.length}`);
+    console.log(`📝 [Transcript] Duration requested: ${durationSeconds}s`);
+
     // Prevent multiple queries from processing simultaneously
     if (this.isProcessingQuery) {
       return;
@@ -588,8 +710,21 @@ class TranscriptionManager {
 
     let isRunning = true;
 
-    // Remove wake word from query
-    const query = this.removeWakeWord(rawCombinedText);
+    // Remove wake word from query (only if not in continuous mode or follow-up window)
+    const query = (this.isContinuousMode || this.isInFollowUpWindow) ? rawCombinedText : this.removeWakeWord(rawCombinedText);
+
+    // Check for exit commands in continuous mode
+    if (this.isContinuousMode && this.containsExitCommand(query)) {
+      isRunning = false;
+      this.exitContinuousMode();
+      this.session.layouts.showTextWall(
+        wrapText("Goodbye! I've stopped listening.", 30),
+        { durationMs: 3000 }
+      );
+      this.isProcessingQuery = false;
+      this.isListeningToQuery = false;
+      return;
+    }
 
     if (query.trim().length === 0) {
       isRunning = false;
@@ -777,8 +912,11 @@ class TranscriptionManager {
       logger.error(error, `[Session ${this.sessionId}]: Error processing query:`);
       this.showOrSpeakText("Sorry, there was an error processing your request.");
     } finally {
-      // Reset the state for future queries
+      // IMPORTANT: Reset transcriptionStartTime FIRST before doing anything else
+      // This ensures any new transcriptions will have a fresh start time
+      // and won't include the old query we just processed
       this.transcriptionStartTime = 0;
+
       if (this.timeoutId) {
         clearTimeout(this.timeoutId);
         this.timeoutId = undefined;
@@ -790,8 +928,49 @@ class TranscriptionManager {
         this.maxListeningTimeoutId = undefined;
       }
 
-      // Reset listening state
-      this.isListeningToQuery = false;
+      // Wait for speech to complete, then start follow-up window OR handle continuous mode
+      const waitForSpeechAndStartFollowUp = async () => {
+        // Poll until speech is done (check every 100ms, max 30 seconds)
+        const maxWaitTime = 30000;
+        const pollInterval = 100;
+        let waited = 0;
+
+        while (this.isSpeaking && waited < maxWaitTime) {
+          await new Promise(resolve => setTimeout(resolve, pollInterval));
+          waited += pollInterval;
+        }
+
+        console.log(`✅ [Speech Complete] Waited ${waited}ms for speech to finish`);
+
+        // In continuous mode, keep listening active and restart silence timer
+        if (this.isContinuousMode) {
+          console.log(`🔄 [Continuous Mode] Re-enabling listening with silence timer`);
+          this.isListeningToQuery = false; // Reset to allow next query
+          this.startSilenceTimer(); // Restart silence timer
+
+          // Play audio feedback to indicate ready for next query
+          const hasScreen = this.session.capabilities?.hasDisplay;
+          if (this.session.settings.get<boolean>("speak_response") || !hasScreen) {
+            this.session.audio.playAudio({audioUrl: START_LISTENING_SOUND_URL}).catch(err => {
+              this.logger.debug('Continuous mode start listening audio failed:', err);
+            });
+          }
+        } else {
+          // Default mode: Start 5-second follow-up window
+          console.log(`⏱️  [Follow-up Window] Starting 5-second window for follow-up questions`);
+          this.isListeningToQuery = false; // Reset to allow next query
+          this.startFollowUpWindow(); // Start the 5-second follow-up window
+          // Note: No audio feedback here - we silently wait for follow-up or timeout
+        }
+      };
+
+      // Execute async without blocking
+      waitForSpeechAndStartFollowUp().catch(err => {
+        this.logger.error(err, 'Error in speech completion handling:');
+        // Fallback: reset listening state anyway
+        this.isListeningToQuery = false;
+      });
+
       // ALWAYS STAY SUBSCRIBED - DEBUGGING ISSUE
       // const requireHeadUpWindow = !!this.session.settings.get<boolean>('wake_requires_head_up');
       // if (requireHeadUpWindow && Date.now() > this.headWakeWindowUntilMs) {
@@ -812,6 +991,7 @@ class TranscriptionManager {
     this.session.layouts.showTextWall(wrapText(text, 30), { durationMs: 5000 });
     const hasScreenProcess = this.session.capabilities?.hasDisplay;
     if (this.session.settings.get<boolean>("speak_response") || !hasScreenProcess) {
+      this.isSpeaking = true;
       try {
         const result = await this.session.audio.speak(text);
         if (result.error) {
@@ -819,6 +999,8 @@ class TranscriptionManager {
         }
       } catch (error) {
         this.logger.error(error, `[Session ${this.sessionId}]: Error speaking text:`);
+      } finally {
+        this.isSpeaking = false;
       }
     }
   }
@@ -898,7 +1080,18 @@ class TranscriptionManager {
     if (this.maxListeningTimeoutId) {
       clearTimeout(this.maxListeningTimeoutId);
     }
-
+    // Clear the silence timer
+    if (this.silenceTimeoutId) {
+      clearTimeout(this.silenceTimeoutId);
+    }
+    // Clear the follow-up timer
+    if (this.followUpTimeoutId) {
+      clearTimeout(this.followUpTimeoutId);
+    }
+    // Exit continuous mode
+    this.exitContinuousMode();
+    // Exit follow-up window
+    this.exitFollowUpWindow();
   }
 }
 
