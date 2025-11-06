@@ -34,6 +34,8 @@ When asked about the smart glasses operating system or the platform you run on, 
 
 You are an intelligent assistant that is running on the smart glasses of a user. They sometimes directly talk to you by saying a wake word and then asking a question (User Query). Answer the User Query to the best of your ability. Try to infer the User Query intent even if they don't give enough info. The query may contain some extra unrelated speech not related to the query - ignore any noise to answer just the user's intended query. Make your answer concise, leave out filler words, make the answer direct and professional yet friendly, answer in 15 words or less (no newlines), but don't be overly brief (e.g. for weather, give temp. and rain). Use telegraph style writing.
 
+IMPORTANT - Context-Enhanced Queries: Some queries may include a [CONTEXT FROM PREVIOUS EXCHANGE] section. This means the user's current question is a follow-up to a previous conversation. Use this context to understand references like "it", "that", "tomorrow", etc. The context is automatically added by the system when it detects the query needs it. Always consider this context when formulating your answer.
+
 Utilize available tools when necessary and adhere to the following guidelines:
 
 1. If the assistant has high confidence the answer is known internally, respond directly; only invoke Search_Engine if uncertain or answer depends on external data.
@@ -174,6 +176,76 @@ export class MiraAgent implements Agent {
    */
   public clearConversationHistory(): void {
     this.conversationHistory = [];
+  }
+
+  /**
+   * Detects if the current query is related to recent conversation history
+   * Uses the LLM to determine if this is a follow-up question
+   */
+  private async detectRelatedQuery(query: string): Promise<boolean> {
+    // Don't check for relatedness if there's no conversation history
+    if (this.conversationHistory.length === 0) {
+      return false;
+    }
+
+    // Get the most recent conversation turn
+    const recentTurn = this.conversationHistory[this.conversationHistory.length - 1];
+
+    // Check if the conversation is still recent (within 30 minutes)
+    const timeSinceLastQuery = Date.now() - recentTurn.timestamp;
+    if (timeSinceLastQuery > MAX_CONVERSATION_AGE_MS) {
+      return false;
+    }
+
+    // Use a simple, fast LLM to detect if this is a follow-up query
+    const llm = LLMProvider.getLLM();
+
+    const detectionPrompt = `You are analyzing whether a user's current query is a follow-up to their previous conversation.
+
+Previous conversation:
+User: "${recentTurn.query}"
+Assistant: "${recentTurn.response}"
+
+Current query: "${query}"
+
+Determine if the current query is a follow-up that references or relates to the previous conversation.
+Follow-up indicators include:
+- Pronouns referring to previous content (it, that, those, this, them, he, she, they)
+- Temporal references (yesterday, today, tomorrow, later, earlier, before, after, now, then)
+- Continuation words (also, too, as well, and, additionally, furthermore)
+- Questions about "what about", "how about"
+- Implicit context that only makes sense with previous conversation
+- References to entities or topics from the previous exchange
+
+Answer with ONLY "YES" if it's a follow-up question that needs context from the previous conversation, or "NO" if it's an independent query.`;
+
+    try {
+      const result = await llm.invoke([new HumanMessage(detectionPrompt)]);
+      const answer = result.content.toString().trim().toUpperCase();
+      return answer.includes('YES');
+    } catch (error) {
+      console.error('[MiraAgent] Error detecting related query:', error);
+      // Default to false if detection fails
+      return false;
+    }
+  }
+
+  /**
+   * Builds an enhanced query by appending relevant conversation context
+   * when a follow-up query is detected
+   */
+  private buildEnhancedQuery(query: string): string {
+    if (this.conversationHistory.length === 0) {
+      return query;
+    }
+
+    // Get the most recent conversation turn
+    const recentTurn = this.conversationHistory[this.conversationHistory.length - 1];
+
+    // Build context string
+    const contextNote = `\n\n[CONTEXT FROM PREVIOUS EXCHANGE - User previously asked: "${recentTurn.query}" and you responded: "${recentTurn.response}"]`;
+
+    return query + contextNote;
   }
 
     /**
@@ -435,7 +507,7 @@ export class MiraAgent implements Agent {
       // Extract required fields from the userContext.
       const transcriptHistory = userContext.transcript_history || "";
       const insightHistory = userContext.insight_history || "";
-      const query = userContext.query || "";
+      let query = userContext.query || "";
       const photo = userContext.photo as PhotoData | null;
 
       let turns = 0;
@@ -445,7 +517,18 @@ export class MiraAgent implements Agent {
         return { answer: "No query provided.", needsCamera: false };
       }
 
-      console.log("Query:", query);     
+      console.log("Query:", query);
+
+      // STEP 0: Detect if this is a follow-up query and enhance it with context
+      console.log(`⏱️  [+${Date.now() - startTime}ms] 🔍 Checking if query is a follow-up...`);
+      const isFollowUp = await this.detectRelatedQuery(query);
+      if (isFollowUp) {
+        console.log(`⏱️  [+${Date.now() - startTime}ms] ✅ Follow-up detected! Enhancing query with context...`);
+        query = this.buildEnhancedQuery(query);
+        console.log(`⏱️  [+${Date.now() - startTime}ms] 📝 Enhanced query:`, query);
+      } else {
+        console.log(`⏱️  [+${Date.now() - startTime}ms] ℹ️  Independent query, no context enhancement needed`);
+      }     
       console.log("Location Context:", this.locationContext);
       // Only add location context if we have a valid city
       const locationInfo = this.locationContext.city !== 'Unknown'
