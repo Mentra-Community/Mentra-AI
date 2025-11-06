@@ -368,9 +368,9 @@ class TranscriptionManager {
     // }
   }
 
-  private async getPhoto(): Promise<PhotoData | null> {
+  private async getPhoto(waitForPhoto: boolean = false): Promise<PhotoData | null> {
     const getPhotoStartTime = Date.now();
-    console.log(`📸 [${new Date().toISOString()}] getPhoto() called at timestamp: ${getPhotoStartTime}`);
+    console.log(`📸 [${new Date().toISOString()}] getPhoto() called (waitForPhoto: ${waitForPhoto}) at timestamp: ${getPhotoStartTime}`);
 
     if (this.activePhotos.has(this.sessionId)) {
       const photo = this.activePhotos.get(this.sessionId);
@@ -379,7 +379,13 @@ class TranscriptionManager {
         return photo.photoData;
       } else {
         if (photo?.promise) {
-          // wait up to 5 seconds for promise to resolve
+          // If waitForPhoto is false, return null immediately (don't block)
+          if (!waitForPhoto) {
+            console.log(`📸 [${new Date().toISOString()}] ⚡ Not waiting for photo (waitForPhoto=false) - returning null`);
+            return null;
+          }
+
+          // If waitForPhoto is true, wait up to 5 seconds for promise to resolve
           const waitStartTime = Date.now();
           const requestAge = photo.requestTime ? waitStartTime - photo.requestTime : 'unknown';
           console.log(`📸 [${new Date().toISOString()}] ⏳ Waiting for photo promise (request age: ${requestAge}ms, timeout: 5000ms)`);
@@ -647,15 +653,22 @@ class TranscriptionManager {
       );
 
       const photoStartTime = Date.now();
-      console.log(`⏱️  [+${photoStartTime - processQueryStartTime}ms] 📸 Getting photo...`);
-      const photo = await this.getPhoto();
-      console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ${photo ? '✅ Photo retrieved' : '⚪ No photo available'}`);
+      console.log(`⏱️  [+${photoStartTime - processQueryStartTime}ms] 📸 Getting cached photo (non-blocking)...`);
+      // Get photo without waiting (non-blocking) - returns cached photo or null
+      const photo = await this.getPhoto(false);
+      console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ${photo ? '✅ Cached photo retrieved' : '⚪ No cached photo available (will wait only if needed)'}`);
 
       const agentStartTime = Date.now();
       console.log(`⏱️  [+${agentStartTime - processQueryStartTime}ms] 🤖 Invoking MiraAgent.handleContext...`);
 
+      // Create callback for agent to wait for photo if needed
+      const getPhotoCallback = async (): Promise<PhotoData | null> => {
+        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📸 Agent requested photo wait - calling getPhoto(true)...`);
+        return await this.getPhoto(true);
+      };
+
       // Process the query with the Mira agent
-      const inputData = { query, photo };
+      const inputData = { query, photo, getPhotoCallback };
       const agentResponse = await this.miraAgent.handleContext(inputData);
 
       const agentEndTime = Date.now();

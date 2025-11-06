@@ -603,7 +603,8 @@ Answer with ONLY "YES" if it's a follow-up question that needs context from the 
       const transcriptHistory = userContext.transcript_history || "";
       const insightHistory = userContext.insight_history || "";
       let query = userContext.query || "";
-      const photo = userContext.photo as PhotoData | null;
+      let photo = userContext.photo as PhotoData | null;
+      const getPhotoCallback = userContext.getPhotoCallback as (() => Promise<PhotoData | null>) | undefined;
 
       let turns = 0;
 
@@ -656,12 +657,30 @@ Answer with ONLY "YES" if it's a follow-up question that needs context from the 
       // STEP 2: Run text-based agent with appropriate response mode
       console.log(`⏱️  [+${Date.now() - startTime}ms] 🚀 Running text-based classifier...`);
       const textClassifierStart = Date.now();
-      const textResult = await this.runTextBasedAgent(query, locationInfo, notificationsContext, localtimeContext, !!photo, responseMode);
+      const textResult = await this.runTextBasedAgent(query, locationInfo, notificationsContext, localtimeContext, !!photo || !!getPhotoCallback, responseMode);
       console.log(`⏱️  [+${Date.now() - startTime}ms] ✅ Text classifier complete (took ${Date.now() - textClassifierStart}ms)`);
       console.log(`🤖 Camera needed:`, textResult.needsCamera);
       console.log(`🤖 Text answer:`, textResult.answer);
 
-      // STEP 2: If query needs camera AND we have a photo, run image analysis
+      // STEP 3: If query needs camera, try to get photo (wait if needed)
+      if (textResult.needsCamera && !photo && getPhotoCallback) {
+        console.log(`⏱️  [+${Date.now() - startTime}ms] 📸 Camera needed but no cached photo - waiting for photo...`);
+        try {
+          const photoWaitStart = Date.now();
+          photo = await getPhotoCallback();
+          const photoWaitDuration = Date.now() - photoWaitStart;
+          if (photo) {
+            console.log(`⏱️  [+${Date.now() - startTime}ms] ✅ Photo retrieved after ${photoWaitDuration}ms wait`);
+          } else {
+            console.log(`⏱️  [+${Date.now() - startTime}ms] ⚠️  Photo wait completed but no photo available (${photoWaitDuration}ms)`);
+          }
+        } catch (error) {
+          console.error(`⏱️  [+${Date.now() - startTime}ms] ❌ Error waiting for photo:`, error);
+          photo = null;
+        }
+      }
+
+      // STEP 4: If query needs camera AND we have a photo, run image analysis
       if (textResult.needsCamera && photo) {
         try {
           console.log(`⏱️  [+${Date.now() - startTime}ms] 📸 Camera needed - running image analysis...`);
@@ -699,7 +718,7 @@ Answer with ONLY "YES" if it's a follow-up question that needs context from the 
         }
       }
 
-      // STEP 3: Either no camera needed OR no photo available - return text answer
+      // STEP 5: Either no camera needed OR no photo available - return text answer
       const totalDuration = Date.now() - startTime;
       console.log(`\n${"=".repeat(60)}`);
       console.log(`⏱️  [+${totalDuration}ms] 📝 RETURNING TEXT-BASED RESPONSE`);
