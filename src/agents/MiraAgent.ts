@@ -26,13 +26,44 @@ interface QuestionAnswer {
     insight: string;
 }
 
-const systemPromptBlueprint = `You are Mira: a helpful, professional, and concise AI assistant living in smart glasses. You have a friendly yet professional personality and always answer in character as Mira. When asked about yourself or your abilities, respond in a way that reflects your role as the smart glasses assistant, referencing your skills and available tools. Express yourself in a consise, professional, to-the-point manner. Always keep answers under 15 words and never break character.
+// Response modes with their configurations
+export enum ResponseMode {
+  QUICK = 'quick',      // 15 words - Simple queries, confirmations
+  STANDARD = 'standard', // 75 words - Moderately complex questions
+  DETAILED = 'detailed'  // 200 words - Sophisticated/research questions
+}
+
+interface ResponseConfig {
+  wordLimit: number;
+  maxTokens: number;
+  instructions: string;
+}
+
+const RESPONSE_CONFIGS: Record<ResponseMode, ResponseConfig> = {
+  [ResponseMode.QUICK]: {
+    wordLimit: 15,
+    maxTokens: 300,
+    instructions: 'Always keep answers under 15 words and never break character. Use telegraph style writing.'
+  },
+  [ResponseMode.STANDARD]: {
+    wordLimit: 75,
+    maxTokens: 600,
+    instructions: 'Provide a clear, comprehensive answer in 50-75 words. Be informative yet concise, giving enough detail to fully address the query.'
+  },
+  [ResponseMode.DETAILED]: {
+    wordLimit: 200,
+    maxTokens: 1000,
+    instructions: 'Provide a thorough, detailed explanation in 150-200 words. Include relevant context, examples, and comprehensive information. Structure your response clearly with proper explanations.'
+  }
+};
+
+const systemPromptBlueprint = `You are Mira: a helpful, professional, and concise AI assistant living in smart glasses. You have a friendly yet professional personality and always answer in character as Mira. When asked about yourself or your abilities, respond in a way that reflects your role as the smart glasses assistant, referencing your skills and available tools. Express yourself in a consise, professional, to-the-point manner. {response_instructions}
 
 When asked about which smart glasses to use, mention Mentra Live (AI glasses with cameras, available now).
 
 When asked about the smart glasses operating system or the platform you run on, mention that you run on Mentra OS.
 
-You are an intelligent assistant that is running on the smart glasses of a user. They sometimes directly talk to you by saying a wake word and then asking a question (User Query). Answer the User Query to the best of your ability. Try to infer the User Query intent even if they don't give enough info. The query may contain some extra unrelated speech not related to the query - ignore any noise to answer just the user's intended query. Make your answer concise, leave out filler words, make the answer direct and professional yet friendly, answer in 15 words or less (no newlines), but don't be overly brief (e.g. for weather, give temp. and rain). Use telegraph style writing.
+You are an intelligent assistant that is running on the smart glasses of a user. They sometimes directly talk to you by saying a wake word and then asking a question (User Query). Answer the User Query to the best of your ability. Try to infer the User Query intent even if they don't give enough info. The query may contain some extra unrelated speech not related to the query - ignore any noise to answer just the user's intended query. Make your answer direct, professional yet friendly.
 
 IMPORTANT - Context-Enhanced Queries: Some queries may include a [CONTEXT FROM PREVIOUS EXCHANGE] section. This means the user's current question is a follow-up to a previous conversation. Use this context to understand references like "it", "that", "tomorrow", etc. The context is automatically added by the system when it detects the query needs it. Always consider this context when formulating your answer.
 
@@ -42,8 +73,7 @@ Utilize available tools when necessary and adhere to the following guidelines:
 2. Invoke the "Search_Engine" tool for confirming facts or retrieving extra details. Use the Search_Engine tool automatically to search the web for information about the user's query whenever you don't have enough information to answer.
 3. Use any other tools at your disposal as appropriate.  Proactively call tools that could give you any information you may need.
 4. You should think out loud before you answer. Come up with a plan for how to determine the answer accurately (including tools which might help) and then execute the plan. Use the Internal_Thinking tool to think out loud and reason about complex problems.
-5. Keep your final answer brief (fewer than 15 words).
-6. IMPORTANT: After providing your final answer, you MUST also indicate whether this query requires camera/visual access. Add a new line after "Final Answer:" with "Needs Camera: true" or "Needs Camera: false". Queries that need camera: "what is this?", "read this", "what color is that?", "describe what you see". Queries that don't need camera: "what's the weather?", "set a timer", "what time is it?".
+5. IMPORTANT: After providing your final answer, you MUST also indicate whether this query requires camera/visual access. Add a new line after "Final Answer:" with "Needs Camera: true" or "Needs Camera: false". Queries that need camera: "what is this?", "read this", "what color is that?", "describe what you see". Queries that don't need camera: "what's the weather?", "set a timer", "what time is it?".
 7. When you have enough information to answer, output your final answer in this exact format:
    "Final Answer: <concise answer>
    Needs Camera: true/false"
@@ -176,6 +206,65 @@ export class MiraAgent implements Agent {
    */
   public clearConversationHistory(): void {
     this.conversationHistory = [];
+  }
+
+  /**
+   * Classifies query complexity to determine appropriate response mode
+   * Uses heuristics and pattern matching for fast classification
+   */
+  private classifyQueryComplexity(query: string): ResponseMode {
+    const lowerQuery = query.toLowerCase();
+
+    // Keywords indicating need for detailed responses
+    const detailedKeywords = [
+      'explain', 'how does', 'how do', 'why does', 'why do', 'why is', 'why are',
+      'what is the difference', 'compare', 'contrast', 'tell me about',
+      'describe', 'elaborate', 'in detail', 'comprehensive', 'understand',
+      'breakdown', 'walk me through', 'teach me', 'help me understand',
+      'what are the implications', 'analyze', 'evaluation', 'pros and cons',
+      'advantages and disadvantages', 'tell me more', 'give me details'
+    ];
+
+    // Keywords for standard responses (moderate complexity)
+    const standardKeywords = [
+      'how to', 'what are', 'which', 'where can', 'when should',
+      'recommend', 'suggest', 'best way', 'options for', 'ways to',
+      'process of', 'steps to', 'guide', 'tutorial', 'instructions'
+    ];
+
+    // Check for detailed response triggers
+    for (const keyword of detailedKeywords) {
+      if (lowerQuery.includes(keyword)) {
+        console.log(`[Complexity] DETAILED mode triggered by keyword: "${keyword}"`);
+        return ResponseMode.DETAILED;
+      }
+    }
+
+    // Check for standard response triggers
+    for (const keyword of standardKeywords) {
+      if (lowerQuery.includes(keyword)) {
+        console.log(`[Complexity] STANDARD mode triggered by keyword: "${keyword}"`);
+        return ResponseMode.STANDARD;
+      }
+    }
+
+    // Check query length (longer queries often need more detailed responses)
+    const wordCount = query.trim().split(/\s+/).length;
+    if (wordCount > 15) {
+      console.log(`[Complexity] STANDARD mode triggered by word count: ${wordCount}`);
+      return ResponseMode.STANDARD;
+    }
+
+    // Check for question marks indicating complex questions
+    const questionMarks = (query.match(/\?/g) || []).length;
+    if (questionMarks > 1) {
+      console.log(`[Complexity] STANDARD mode triggered by multiple questions: ${questionMarks}`);
+      return ResponseMode.STANDARD;
+    }
+
+    // Default to quick mode for simple queries
+    console.log(`[Complexity] QUICK mode (default) for query`);
+    return ResponseMode.QUICK;
   }
 
   /**
@@ -370,9 +459,14 @@ Answer with ONLY "YES" if it's a follow-up question that needs context from the 
     locationInfo: string,
     notificationsContext: string,
     localtimeContext: string,
-    hasPhoto: boolean
+    hasPhoto: boolean,
+    responseMode: ResponseMode = ResponseMode.QUICK
   ): Promise<{ answer: string; needsCamera: boolean }> {
-    const llm = LLMProvider.getLLM().bindTools(this.agentTools);
+    // Get configuration for the selected response mode
+    const config = RESPONSE_CONFIGS[responseMode];
+    console.log(`[Response Mode] Using ${responseMode.toUpperCase()} mode (${config.wordLimit} words, ${config.maxTokens} tokens)`);
+
+    const llm = LLMProvider.getLLM(config.maxTokens).bindTools(this.agentTools);
     const toolNames = this.agentTools.map((tool) => tool.name + ": " + tool.description || "");
 
     const photoContext = hasPhoto
@@ -382,6 +476,7 @@ Answer with ONLY "YES" if it's a follow-up question that needs context from the 
     const conversationHistoryText = this.formatConversationHistory();
 
     const systemPrompt = systemPromptBlueprint
+      .replace("{response_instructions}", config.instructions)
       .replace("{tool_names}", toolNames.join("\n"))
       .replace("{location_context}", locationInfo)
       .replace("{notifications_context}", notificationsContext)
@@ -553,10 +648,15 @@ Answer with ONLY "YES" if it's a follow-up question that needs context from the 
         notificationsContext = `Recent notifications:\n${notifs}\n\n`;
       }
 
-      // STEP 1: Always run text-based agent first to classify the query
+      // STEP 1: Classify query complexity
+      console.log(`⏱️  [+${Date.now() - startTime}ms] 🔍 Classifying query complexity...`);
+      const responseMode = this.classifyQueryComplexity(query);
+      console.log(`⏱️  [+${Date.now() - startTime}ms] ✅ Response mode selected: ${responseMode.toUpperCase()}`);
+
+      // STEP 2: Run text-based agent with appropriate response mode
       console.log(`⏱️  [+${Date.now() - startTime}ms] 🚀 Running text-based classifier...`);
       const textClassifierStart = Date.now();
-      const textResult = await this.runTextBasedAgent(query, locationInfo, notificationsContext, localtimeContext, !!photo);
+      const textResult = await this.runTextBasedAgent(query, locationInfo, notificationsContext, localtimeContext, !!photo, responseMode);
       console.log(`⏱️  [+${Date.now() - startTime}ms] ✅ Text classifier complete (took ${Date.now() - textClassifierStart}ms)`);
       console.log(`🤖 Camera needed:`, textResult.needsCamera);
       console.log(`🤖 Text answer:`, textResult.answer);
