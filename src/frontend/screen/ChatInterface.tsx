@@ -111,6 +111,34 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
           } else {
             console.log('[ChatInterface] Ignoring message from different conversation');
           }
+        } else if (data.type === 'message_update') {
+          console.log('[ChatInterface] 🔄 Updating message:', data.id);
+
+          const isRelevant =
+            (data.senderId === userId && data.recipientId === recipientId) ||
+            (data.senderId === recipientId && data.recipientId === userId);
+
+          if (isRelevant) {
+            setMessages(prev => {
+              const messageIndex = prev.findIndex(m => m.id === data.id);
+              if (messageIndex === -1) {
+                console.warn('[ChatInterface] ⚠️ Message not found for update:', data.id);
+                return prev;
+              }
+
+              const updatedMessages = [...prev];
+              updatedMessages[messageIndex] = {
+                ...updatedMessages[messageIndex],
+                content: data.content,
+                image: data.image,
+                timestamp: new Date(data.timestamp)
+              };
+              console.log('[ChatInterface] ✅ Message updated:', data.id);
+              return updatedMessages;
+            });
+          } else {
+            console.log('[ChatInterface] Ignoring message update from different conversation');
+          }
         } else if (data.type === 'processing') {
           console.log('[ChatInterface] 🔄 Processing indicator shown');
           setIsProcessing(true);

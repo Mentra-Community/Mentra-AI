@@ -136,7 +136,7 @@ export class ChatManager {
   /**
    * Broadcast a message to all connections of a specific user
    */
-  private broadcastMessage(userId: string, message: ChatMessage): void {
+  private broadcastMessage(userId: string, message: ChatMessage, isUpdate: boolean = false): void {
     const userData = this.userConnections.get(userId);
     if (!userData) {
       console.log(`[ChatManager] ⚠️ No connections for user ${userId}, message not broadcasted`);
@@ -145,7 +145,7 @@ export class ChatManager {
 
     // Broadcast to WebSocket connections
     const messageData = JSON.stringify({
-      type: 'message',
+      type: isUpdate ? 'message_update' : 'message',
       id: message.id,
       senderId: message.senderId,
       recipientId: message.recipientId,
@@ -154,7 +154,7 @@ export class ChatManager {
       image: message.image
     });
 
-    console.log(`[ChatManager] 📡 Broadcasting to ${userId}: ${userData.ws.size} WS + ${userData.sse.size} SSE connections`);
+    console.log(`[ChatManager] 📡 Broadcasting ${isUpdate ? 'UPDATE' : 'NEW'} to ${userId}: ${userData.ws.size} WS + ${userData.sse.size} SSE connections`);
 
     userData.ws.forEach((ws: WebSocket) => {
       if (ws.readyState === WebSocket.OPEN) {
@@ -221,12 +221,77 @@ export class ChatManager {
 
   /**
    * Add a user message (from voice query) to the chat
+   * Returns the message ID for potential updates
    */
-  addUserMessage(userId: string, content: string, image?: string): void {
+  addUserMessage(userId: string, content: string, image?: string): string {
     console.log(`[ChatManager] 👤 Adding user message for ${userId}:`, content.substring(0, 50) + '...');
     const aiRecipientId = 'mira-assistant';
-    this.addMessage(userId, aiRecipientId, content, image);
-    console.log(`[ChatManager] ✅ User message added and broadcasted`);
+    const conversationId = this.getConversationId(userId, aiRecipientId);
+
+    if (!this.conversations.has(conversationId)) {
+      this.conversations.set(conversationId, {
+        messages: []
+      });
+    }
+
+    const message: ChatMessage = {
+      id: uuidv4(),
+      senderId: userId,
+      recipientId: aiRecipientId,
+      content,
+      timestamp: new Date(),
+      image
+    };
+
+    const conversationData = this.conversations.get(conversationId)!;
+    conversationData.messages.push(message);
+
+    console.log(`[ChatManager] 💾 Message stored in conversation ${conversationId}. Total messages: ${conversationData.messages.length}`);
+
+    // Broadcast to both sender and recipient
+    this.broadcastMessage(userId, message);
+    this.broadcastMessage(aiRecipientId, message);
+
+    console.log(`[ChatManager] ✅ User message added and broadcasted with ID: ${message.id}`);
+    return message.id;
+  }
+
+  /**
+   * Update an existing user message (e.g., to add a photo after initial send)
+   */
+  updateUserMessage(userId: string, messageId: string, content: string, image?: string): boolean {
+    console.log(`[ChatManager] 🔄 Updating message ${messageId} for ${userId}`);
+    const aiRecipientId = 'mira-assistant';
+    const conversationId = this.getConversationId(userId, aiRecipientId);
+
+    const conversationData = this.conversations.get(conversationId);
+    if (!conversationData) {
+      console.warn(`[ChatManager] ⚠️ No conversation found for ${conversationId}`);
+      return false;
+    }
+
+    const messageIndex = conversationData.messages.findIndex(m => m.id === messageId);
+    if (messageIndex === -1) {
+      console.warn(`[ChatManager] ⚠️ Message ${messageId} not found in conversation ${conversationId}`);
+      return false;
+    }
+
+    // Update the message (keep original timestamp to avoid re-ordering)
+    conversationData.messages[messageIndex] = {
+      ...conversationData.messages[messageIndex],
+      content,
+      image
+      // Note: NOT updating timestamp to preserve message order
+    };
+
+    const updatedMessage = conversationData.messages[messageIndex];
+    console.log(`[ChatManager] ✅ Message ${messageId} updated successfully`);
+
+    // Broadcast the updated message with isUpdate flag
+    this.broadcastMessage(userId, updatedMessage, true);
+    this.broadcastMessage(aiRecipientId, updatedMessage, true);
+
+    return true;
   }
 
   /**

@@ -99,6 +99,7 @@ class TranscriptionManager {
   private transcriptProcessor: TranscriptProcessor;
   private activePhotos: Map<string, { promise: Promise<PhotoData>, photoData: PhotoData | null, lastPhotoTime: number, requestTime?: number }> = new Map();
   private logger: AppSession['logger'];
+  private currentQueryMessageId?: string; // Track the current query message ID for updates
 
     /**
      * Tracks the last observed head position and a time window during which
@@ -296,6 +297,17 @@ class TranscriptionManager {
 
     // Set a new timeout to process the query
     this.timeoutId = setTimeout(() => {
+      // Send query to frontend and trigger processing animation
+      const displayText = this.removeWakeWord(text);
+      if (this.chatManager && displayText.trim().length > 0) {
+        console.log(`\n${"=".repeat(70)}`);
+        console.log(`📱 [WEBVIEW] Sending query to webview (early) for user: ${this.userId}`);
+        console.log(`📱 [WEBVIEW] Query: "${displayText}"`);
+        console.log(`${"=".repeat(70)}\n`);
+        // Store the message ID so we can update it later if we get a photo
+        this.currentQueryMessageId = this.chatManager.addUserMessage(this.userId, displayText);
+        this.chatManager.setProcessing(this.userId, true);
+      }
       this.processQuery(text, timerDuration);
     }, timerDuration);
   }
@@ -690,27 +702,31 @@ class TranscriptionManager {
 
       console.log(`🎯 needsCamera flag: ${needsCamera}`);
 
-      // Send user query to webview with photo only if camera was needed
-      if (this.chatManager) {
+      // Update user message with photo if camera was needed (message already sent earlier)
+      if (this.chatManager && needsCamera && photo) {
         console.log(`\n${"=".repeat(70)}`);
-        console.log(`📱 [WEBVIEW] Sending query to webview for user: ${this.userId}`);
-        console.log(`📱 [WEBVIEW] Query: "${query}"`);
-
-        // Convert PhotoData to base64 only if camera is needed
-        let photoBase64: string | undefined;
-        if (needsCamera && photo) {
-          photoBase64 = `data:${photo.mimeType};base64,${photo.buffer.toString('base64')}`;
-          console.log(`📱 [WEBVIEW] 📷 Including photo (${photo.mimeType}, ${photo.size} bytes) - camera was needed`);
-        } else if (needsCamera && !photo) {
-          console.log(`📱 [WEBVIEW] ⚠️ Camera was needed but no photo available`);
-        } else {
-          console.log(`📱 [WEBVIEW] 📷 Skipping photo - camera not needed for this query`);
-        }
-
+        console.log(`📱 [WEBVIEW] Updating message with photo for user: ${this.userId}`);
+        const photoBase64 = `data:${photo.mimeType};base64,${photo.buffer.toString('base64')}`;
+        console.log(`📱 [WEBVIEW] 📷 Including photo (${photo.mimeType}, ${photo.size} bytes) - camera was needed`);
         console.log(`${"=".repeat(70)}\n`);
-        this.chatManager.addUserMessage(this.userId, query, photoBase64);
-        this.chatManager.setProcessing(this.userId, true);
-      } else {
+
+        // Try to update the existing message if we have its ID
+        if (this.currentQueryMessageId) {
+          const updated = this.chatManager.updateUserMessage(this.userId, this.currentQueryMessageId, query, photoBase64);
+          if (!updated) {
+            console.warn(`📱 [WEBVIEW] ⚠️ Failed to update message ${this.currentQueryMessageId}, creating new message`);
+            this.chatManager.addUserMessage(this.userId, query, photoBase64);
+          } else {
+            console.log(`📱 [WEBVIEW] ✅ Successfully updated message ${this.currentQueryMessageId} with photo`);
+          }
+        } else {
+          // Fallback: create a new message if we don't have the message ID
+          console.warn(`📱 [WEBVIEW] ⚠️ No currentQueryMessageId available, creating new message`);
+          this.chatManager.addUserMessage(this.userId, query, photoBase64);
+        }
+      } else if (this.chatManager && needsCamera && !photo) {
+        console.log(`📱 [WEBVIEW] ⚠️ Camera was needed but no photo available`);
+      } else if (!this.chatManager) {
         console.warn(`⚠️  [WEBVIEW] ChatManager not available - webview won't receive updates`);
       }
 
@@ -802,6 +818,9 @@ class TranscriptionManager {
         clearTimeout(this.maxListeningTimeoutId);
         this.maxListeningTimeoutId = undefined;
       }
+
+      // Clear the current query message ID for next query
+      this.currentQueryMessageId = undefined;
 
       // Reset listening state
       this.isListeningToQuery = false;
