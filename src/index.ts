@@ -997,6 +997,7 @@ class MiraServer extends AppServer {
         }
 
         const messages = this.chatManager.getChatHistory(userId);
+        console.log("GETTING historyL")
         res.json({ messages });
       } catch (error) {
         logger.error(error as Error, 'Error in /api/chat/history:');

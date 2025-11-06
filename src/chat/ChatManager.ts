@@ -86,10 +86,20 @@ export class ChatManager {
 
   /**
    * Get chat history for a conversation between two users
+   * Returns the last 40 messages (most recent)
+   * @param userId1 - First user ID
+   * @param userId2 - Second user ID (defaults to 'mira-assistant' for AI conversations)
    */
-  getChatHistory(userId1: string, userId2: string): ChatMessage[] {
+  getChatHistory(userId1: string, userId2: string = 'mira-assistant'): ChatMessage[] {
     const conversationId = this.getConversationId(userId1, userId2);
-    return this.conversations.get(conversationId)?.messages || [];
+    const messages = this.conversations.get(conversationId)?.messages || [];
+
+    // Return last 40 messages if there are more than 40
+    if (messages.length > 40) {
+      return messages.slice(-40);
+    }
+
+    return messages;
   }
 
   /**
