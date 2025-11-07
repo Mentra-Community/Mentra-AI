@@ -10,7 +10,7 @@ import { MiraAgent } from './agents';
 import { wrapText, TranscriptProcessor } from './utils';
 import { getAllToolsForUser } from './agents/tools/TpaTool';
 import { log } from 'console';
-import { Anim } from './utils/anim';
+// import { Anim } from './utils/anim';
 import { analyzeImage } from './utils/img-processor';
 import { ChatManager } from './chat/ChatManager';
 import express from 'express';
@@ -21,7 +21,9 @@ const AUGMENTOS_API_KEY = process.env.AUGMENTOS_API_KEY;
 const LOCATIONIQ_TOKEN = process.env.LOCATIONIQ_TOKEN;
 
 const PROCESSING_SOUND_URL = "https://mira.augmentos.cloud/popping.mp3";
-const START_LISTENING_SOUND_URL = "https://mira.augmentos.cloud/start.mp3";
+// const START_LISTENING_SOUND_URL = "https://mira.augmentos.cloud/start.mp3";
+
+const START_LISTENING_SOUND_URL = "https://general.dev.tpa.ngrok.app/mira-on.wav";
 
 if (!AUGMENTOS_API_KEY) {
   throw new Error('AUGMENTOS_API_KEY is not set');
@@ -51,7 +53,7 @@ const explicitWakeWords = [
   "hey mear", "he mear", "hey miras", "he miras", "hey miora", "he miora", "hey miri", "he miri",
   "hey maura", "he maura", "hey maya", "he maya", "hey moora", "he moora",
   "hey mihrah", "he mihrah", "ay mira", "ey mira", "yay mira", "hey mihra",
-  "hey mera", "hey mira", "hey mila", "hey mirra", "hey amir", "hey amira",
+  "hey mera", "hey mira", "hey mila", "hey mirra", "hey amir", "hey amira", "hey mary",
 ];
 
 /**
@@ -99,6 +101,7 @@ class TranscriptionManager {
   private transcriptProcessor: TranscriptProcessor;
   private activePhotos: Map<string, { promise: Promise<PhotoData>, photoData: PhotoData | null, lastPhotoTime: number, requestTime?: number }> = new Map();
   private logger: AppSession['logger'];
+  private currentQueryMessageId?: string; // Track the current query message ID for updates
 
     /**
      * Tracks the last observed head position and a time window during which
@@ -296,6 +299,16 @@ class TranscriptionManager {
 
     // Set a new timeout to process the query
     this.timeoutId = setTimeout(() => {
+      // Send query to frontend and trigger processing animation
+      const displayText = this.removeWakeWord(text);
+      if (this.chatManager && displayText.trim().length > 0) {
+        console.log(`\n${"=".repeat(70)}`);
+        console.log(`📱 [WEBVIEW] Sending query to webview (early) for user: ${this.userId}`);
+        console.log(`📱 [WEBVIEW] Query: "${displayText}"`);
+        console.log(`${"=".repeat(70)}\n`);
+        // Store the message ID so we can update it later if we get a photo
+
+      }
       this.processQuery(text, timerDuration);
     }, timerDuration);
   }
@@ -368,9 +381,9 @@ class TranscriptionManager {
     // }
   }
 
-  private async getPhoto(): Promise<PhotoData | null> {
+  private async getPhoto(waitForPhoto: boolean = false): Promise<PhotoData | null> {
     const getPhotoStartTime = Date.now();
-    console.log(`📸 [${new Date().toISOString()}] getPhoto() called at timestamp: ${getPhotoStartTime}`);
+    console.log(`📸 [${new Date().toISOString()}] getPhoto() called (waitForPhoto: ${waitForPhoto}) at timestamp: ${getPhotoStartTime}`);
 
     if (this.activePhotos.has(this.sessionId)) {
       const photo = this.activePhotos.get(this.sessionId);
@@ -379,7 +392,13 @@ class TranscriptionManager {
         return photo.photoData;
       } else {
         if (photo?.promise) {
-          // wait up to 5 seconds for promise to resolve
+          // If waitForPhoto is false, return null immediately (don't block)
+          if (!waitForPhoto) {
+            console.log(`📸 [${new Date().toISOString()}] ⚡ Not waiting for photo (waitForPhoto=false) - returning null`);
+            return null;
+          }
+
+          // If waitForPhoto is true, wait up to 5 seconds for promise to resolve
           const waitStartTime = Date.now();
           const requestAge = photo.requestTime ? waitStartTime - photo.requestTime : 'unknown';
           console.log(`📸 [${new Date().toISOString()}] ⏳ Waiting for photo promise (request age: ${requestAge}ms, timeout: 5000ms)`);
@@ -506,7 +525,9 @@ class TranscriptionManager {
     console.log(`⏱️  [TIMESTAMP] 🎤 processQuery START: ${new Date().toISOString()}`);
     console.log(`${"█".repeat(70)}\n`);
 
-    const anim = new Anim(this.session);
+
+
+    // const anim = new Anim(this.session);
 
     logger.debug("processQuery called ");
     // Calculate the actual duration from transcriptionStartTime to now
@@ -640,22 +661,34 @@ class TranscriptionManager {
       if (displayQuery.length > 60) {
         displayQuery = displayQuery.slice(0, 60).trim() + ' ...';
       }
-      anim.start("Processing query: " + displayQuery); // animiation stop
+      // anim.start("Processing query: " + displayQuery); // animiation stop
       this.session.layouts.showTextWall(
         wrapText("Processing query: " + displayQuery, 30),
         { durationMs: 8000 }
       );
 
       const photoStartTime = Date.now();
-      console.log(`⏱️  [+${photoStartTime - processQueryStartTime}ms] 📸 Getting photo...`);
-      const photo = await this.getPhoto();
-      console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ${photo ? '✅ Photo retrieved' : '⚪ No photo available'}`);
+      console.log(`⏱️  [+${photoStartTime - processQueryStartTime}ms] 📸 Getting cached photo (non-blocking)...`);
+      // Get photo without waiting (non-blocking) - returns cached photo or null
+      const photo = await this.getPhoto(false);
+      console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ${photo ? '✅ Cached photo retrieved' : '⚪ No cached photo available (will wait only if needed)'}`);
 
       const agentStartTime = Date.now();
       console.log(`⏱️  [+${agentStartTime - processQueryStartTime}ms] 🤖 Invoking MiraAgent.handleContext...`);
 
+      // Create callback for agent to wait for photo if needed
+      const getPhotoCallback = async (): Promise<PhotoData | null> => {
+        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📸 Agent requested photo wait - calling getPhoto(true)...`);
+        return await this.getPhoto(true);
+      };
+
       // Process the query with the Mira agent
-      const inputData = { query, photo };
+          // Send query to frontend if not already sent
+    if (this.chatManager && query.trim().length > 0 && !this.currentQueryMessageId) {
+      this.currentQueryMessageId = this.chatManager.addUserMessage(this.userId, query);
+      this.chatManager.setProcessing(this.userId, true);
+    }
+      const inputData = { query, photo, getPhotoCallback };
       const agentResponse = await this.miraAgent.handleContext(inputData);
 
       const agentEndTime = Date.now();
@@ -677,32 +710,36 @@ class TranscriptionManager {
 
       console.log(`🎯 needsCamera flag: ${needsCamera}`);
 
-      // Send user query to webview with photo only if camera was needed
-      if (this.chatManager) {
+      // Update user message with photo if camera was needed (message already sent earlier)
+      if (this.chatManager && needsCamera && photo) {
         console.log(`\n${"=".repeat(70)}`);
-        console.log(`📱 [WEBVIEW] Sending query to webview for user: ${this.userId}`);
-        console.log(`📱 [WEBVIEW] Query: "${query}"`);
-
-        // Convert PhotoData to base64 only if camera is needed
-        let photoBase64: string | undefined;
-        if (needsCamera && photo) {
-          photoBase64 = `data:${photo.mimeType};base64,${photo.buffer.toString('base64')}`;
-          console.log(`📱 [WEBVIEW] 📷 Including photo (${photo.mimeType}, ${photo.size} bytes) - camera was needed`);
-        } else if (needsCamera && !photo) {
-          console.log(`📱 [WEBVIEW] ⚠️ Camera was needed but no photo available`);
-        } else {
-          console.log(`📱 [WEBVIEW] 📷 Skipping photo - camera not needed for this query`);
-        }
-
+        console.log(`📱 [WEBVIEW] Updating message with photo for user: ${this.userId}`);
+        const photoBase64 = `data:${photo.mimeType};base64,${photo.buffer.toString('base64')}`;
+        console.log(`📱 [WEBVIEW] 📷 Including photo (${photo.mimeType}, ${photo.size} bytes) - camera was needed`);
         console.log(`${"=".repeat(70)}\n`);
-        this.chatManager.addUserMessage(this.userId, query, photoBase64);
-        this.chatManager.setProcessing(this.userId, true);
-      } else {
+
+        // Try to update the existing message if we have its ID
+        if (this.currentQueryMessageId) {
+          const updated = this.chatManager.updateUserMessage(this.userId, this.currentQueryMessageId, query, photoBase64);
+          if (!updated) {
+            console.warn(`📱 [WEBVIEW] ⚠️ Failed to update message ${this.currentQueryMessageId}, creating new message`);
+            this.chatManager.addUserMessage(this.userId, query, photoBase64);
+          } else {
+            console.log(`📱 [WEBVIEW] ✅ Successfully updated message ${this.currentQueryMessageId} with photo`);
+          }
+        } else {
+          // Fallback: create a new message if we don't have the message ID
+          console.warn(`📱 [WEBVIEW] ⚠️ No currentQueryMessageId available, creating new message`);
+          this.chatManager.addUserMessage(this.userId, query, photoBase64);
+        }
+      } else if (this.chatManager && needsCamera && !photo) {
+        console.log(`📱 [WEBVIEW] ⚠️ Camera was needed but no photo available`);
+      } else if (!this.chatManager) {
         console.warn(`⚠️  [WEBVIEW] ChatManager not available - webview won't receive updates`);
       }
 
       // analyzeImage(); // Removed - already called in MiraAgent.handleContext
-      anim.stop(); // animiation stop
+      // anim.stop(); // animiation stop
       isRunning = false;
 
       if (!finalAnswer) {
@@ -772,7 +809,7 @@ class TranscriptionManager {
       console.log(`${"█".repeat(70)}\n`);
 
     } catch (error) {
-      anim.stop();
+      // anim.stop();
       console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ❌ Error in processQuery`);
       logger.error(error, `[Session ${this.sessionId}]: Error processing query:`);
       this.showOrSpeakText("Sorry, there was an error processing your request.");
@@ -789,6 +826,9 @@ class TranscriptionManager {
         clearTimeout(this.maxListeningTimeoutId);
         this.maxListeningTimeoutId = undefined;
       }
+
+      // Clear the current query message ID for next query
+      this.currentQueryMessageId = undefined;
 
       // Reset listening state
       this.isListeningToQuery = false;
@@ -997,9 +1037,30 @@ class MiraServer extends AppServer {
         }
 
         const messages = this.chatManager.getChatHistory(userId);
+        console.log("GETTING historyL")
         res.json({ messages });
       } catch (error) {
         logger.error(error as Error, 'Error in /api/chat/history:');
+        res.status(500).json({ error: 'Internal server error' });
+      }
+    });
+
+    // API endpoint to clear chat history (for explicit logout/cleanup)
+    app.delete('/api/chat/clear', (req, res) => {
+      try {
+        const userId = req.query.userId as string;
+
+        if (!userId) {
+          res.status(400).json({ error: 'userId is required' });
+          return;
+        }
+
+        logger.info(`🗑️ Clearing chat data for user ${userId}`);
+        this.chatManager.cleanupUserOnDisconnect(userId);
+
+        res.json({ success: true, message: 'Chat history cleared' });
+      } catch (error) {
+        logger.error(error as Error, 'Error in /api/chat/clear:');
         res.status(500).json({ error: 'Internal server error' });
       }
     });
@@ -1039,6 +1100,10 @@ class MiraServer extends AppServer {
       req.on('close', () => {
         clearInterval(keepAlive);
         this.chatManager.unregisterSSE(userId, res);
+
+        // NOTE: Chat history cleanup happens in onStop() when session ends
+        // This allows users to close/reopen webview without losing messages
+
         console.log(`[SSE] 🔌 Connection closed for user ${userId}`);
       });
     });
@@ -1143,12 +1208,21 @@ class MiraServer extends AppServer {
   // Handle session disconnection
   protected onStop(sessionId: string, userId: string, reason: string): Promise<void> {
     logger.info(`Stopping Mira service for session ${sessionId}, user ${userId}`);
+
+    // Clean up transcription manager
     const manager = this.transcriptionManagers.get(sessionId);
     if (manager) {
       manager.cleanup();
       this.transcriptionManagers.delete(sessionId);
     }
+
+    // Clean up agent for this session
     this.agentPerSession.delete(sessionId);
+
+    // Clean up chat history and user data when session stops
+    this.chatManager.cleanupUserOnDisconnect(userId);
+    logger.info(`🗑️ Cleaned up chat history for user ${userId}`);
+
     return Promise.resolve();
   }
 }

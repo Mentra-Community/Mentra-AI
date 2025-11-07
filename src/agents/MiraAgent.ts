@@ -26,13 +26,46 @@ interface QuestionAnswer {
     insight: string;
 }
 
-const systemPromptBlueprint = `You are Mira: a helpful, professional, and concise AI assistant living in smart glasses. You have a friendly yet professional personality and always answer in character as Mira. When asked about yourself or your abilities, respond in a way that reflects your role as the smart glasses assistant, referencing your skills and available tools. Express yourself in a consise, professional, to-the-point manner. Always keep answers under 15 words and never break character.
+// Response modes with their configurations
+export enum ResponseMode {
+  QUICK = 'quick',      // 15 words - Simple queries, confirmations
+  STANDARD = 'standard', // 75 words - Moderately complex questions
+  DETAILED = 'detailed'  // 200 words - Sophisticated/research questions
+}
+
+interface ResponseConfig {
+  wordLimit: number;
+  maxTokens: number;
+  instructions: string;
+}
+
+const RESPONSE_CONFIGS: Record<ResponseMode, ResponseConfig> = {
+  [ResponseMode.QUICK]: {
+    wordLimit: 15,
+    maxTokens: 1000, // for now this works but should be set to 600 ... 300 was too low
+    instructions: 'Always keep answers under 15 words and never break character. Use telegraph style writing.'
+  },
+  [ResponseMode.STANDARD]: {
+    wordLimit: 75,
+    maxTokens: 1200,
+    instructions: 'Provide a clear, comprehensive answer in 50-75 words. Be informative yet concise, giving enough detail to fully address the query.'
+  },
+  [ResponseMode.DETAILED]: {
+    wordLimit: 200,
+    maxTokens: 1400,
+    instructions: 'Provide a thorough, detailed explanation in 150-200 words. Include relevant context, examples, and comprehensive information. Structure your response clearly with proper explanations.'
+  }
+};
+
+const systemPromptBlueprint = `You are Mira: a helpful, professional, and concise AI assistant living in smart glasses. You have a friendly yet professional personality and always answer in character as Mira. When asked about yourself or your abilities, respond in a way that reflects your role as the smart glasses assistant, referencing your skills and available tools. Express yourself in a consise, professional, to-the-point manner. {response_instructions}
 
 When asked about which smart glasses to use, mention Mentra Live (AI glasses with cameras, available now).
 
 When asked about the smart glasses operating system or the platform you run on, mention that you run on Mentra OS.
 
-You are an intelligent assistant that is running on the smart glasses of a user. They sometimes directly talk to you by saying a wake word and then asking a question (User Query). Answer the User Query to the best of your ability. Try to infer the User Query intent even if they don't give enough info. The query may contain some extra unrelated speech not related to the query - ignore any noise to answer just the user's intended query. Make your answer concise, leave out filler words, make the answer direct and professional yet friendly, answer in 15 words or less (no newlines), but don't be overly brief (e.g. for weather, give temp. and rain). Use telegraph style writing.
+You are an intelligent assistant that is running on the smart glasses of a user. They sometimes directly talk to you by saying a wake word and then asking a question (User Query). Answer the User Query to the best of your ability. Try to infer the User Query intent even if they don't give enough info. The query may contain some extra unrelated speech not related to the query - ignore any noise to answer just the user's intended query. Make your answer direct, professional yet friendly.
+
+IMPORTANT - Context-Enhanced Queries: Some queries may include a [CONTEXT FROM PREVIOUS EXCHANGE] section. This means the user's current question is a follow-up to a previous conversation. Use this context to understand references like "it", "that", "tomorrow", etc. The context is automatically added by the system when it detects the query needs it. Always consider this context when formulating your answer.
 
 Utilize available tools when necessary and adhere to the following guidelines:
 
@@ -40,15 +73,14 @@ Utilize available tools when necessary and adhere to the following guidelines:
 2. Invoke the "Search_Engine" tool for confirming facts or retrieving extra details. Use the Search_Engine tool automatically to search the web for information about the user's query whenever you don't have enough information to answer.
 3. Use any other tools at your disposal as appropriate.  Proactively call tools that could give you any information you may need.
 4. You should think out loud before you answer. Come up with a plan for how to determine the answer accurately (including tools which might help) and then execute the plan. Use the Internal_Thinking tool to think out loud and reason about complex problems.
-5. Keep your final answer brief (fewer than 15 words).
-6. IMPORTANT: After providing your final answer, you MUST also indicate whether this query requires camera/visual access. Add a new line after "Final Answer:" with "Needs Camera: true" or "Needs Camera: false". Queries that need camera: "what is this?", "read this", "what color is that?", "describe what you see". Queries that don't need camera: "what's the weather?", "set a timer", "what time is it?".
+5. IMPORTANT: After providing your final answer, you MUST also indicate whether this query requires camera/visual access. Add a new line after "Final Answer:" with "Needs Camera: true" or "Needs Camera: false". Queries that need camera: "what is this?", "read this", "what color is that?", "describe what you see". Queries that don't need camera: "what's the weather?", "set a timer", "what time is it?".
 7. When you have enough information to answer, output your final answer in this exact format:
    "Final Answer: <concise answer>
    Needs Camera: true/false"
 8. If the query is empty, nonsensical, or useless, return Final Answer: "No query provided." with Needs Camera: false
 9. For context, the UTC time and date is ${new Date().toUTCString()}, but for anything involving dates or times, make sure to response using the user's local time zone. If a tool needs a date or time input, convert it from the user's local time to UTC before passing it to a tool. Always think at length with the Internal_Thinking tool when working with dates and times to make sure you are using the correct time zone and offset. IMPORTANT: When answering time queries, keep it simple - if the user just asks "what time is it?" respond with just the time (e.g., "It's 3:45 PM"). Only include timezone, location, or detailed info if the user specifically asks about timezone, location, or wants detailed time information.{timezone_context}
 10. If the user's query is location-specific (e.g., weather, news, events, or anything that depends on place), always use the user's current location context to provide the most relevant answer.
-11. Use the conversation history below to maintain context across queries. Reference previous exchanges when relevant (e.g., "it", "that", "the place we talked about").
+11. IMPORTANT - Conversation History: You have access to recent conversation history below. When users ask about "our conversation", "what we talked about", "what did I ask earlier", or similar questions about past interactions, you should DIRECTLY reference the conversation history provided below - DO NOT use Smart App Control or any tools to access notes/apps. The conversation history is already available to you in this context. Simply review the exchanges and summarize what was discussed.
 
 {location_context}
 {notifications_context}
@@ -57,7 +89,12 @@ Utilize available tools when necessary and adhere to the following guidelines:
 Tools:
 {tool_names}
 
-Remember to always include both the Final Answer: and Needs Camera: markers in your final response.`;
+**CRITICAL FORMAT REQUIREMENT - YOU MUST FOLLOW THIS:**
+Every response MUST end with these exact markers:
+Final Answer: <your concise answer here>
+Needs Camera: true/false
+
+Do NOT end your response without these markers. Even if you use tools multiple times, you MUST always conclude with a Final Answer. This is MANDATORY and NON-NEGOTIABLE. Responses without "Final Answer:" will be rejected.`;
 
 // Conversation memory configuration
 const MAX_CONVERSATION_HISTORY = 10; // Keep last 10 exchanges (20 messages)
@@ -174,6 +211,135 @@ export class MiraAgent implements Agent {
    */
   public clearConversationHistory(): void {
     this.conversationHistory = [];
+  }
+
+  /**
+   * Classifies query complexity to determine appropriate response mode
+   * Uses heuristics and pattern matching for fast classification
+   */
+  private classifyQueryComplexity(query: string): ResponseMode {
+    const lowerQuery = query.toLowerCase();
+
+    // Keywords indicating need for detailed responses
+    const detailedKeywords = [
+      'explain', 'how does', 'how do', 'why does', 'why do', 'why is', 'why are',
+      'what is the difference', 'compare', 'contrast', 'tell me about',
+      'describe', 'elaborate', 'in detail', 'comprehensive', 'understand',
+      'breakdown', 'walk me through', 'teach me', 'help me understand',
+      'what are the implications', 'analyze', 'evaluation', 'pros and cons',
+      'advantages and disadvantages', 'tell me more', 'give me details'
+    ];
+
+    // Keywords for standard responses (moderate complexity)
+    const standardKeywords = [
+      'how to', 'what are', 'which', 'where can', 'when should',
+      'recommend', 'suggest', 'best way', 'options for', 'ways to',
+      'process of', 'steps to', 'guide', 'tutorial', 'instructions'
+    ];
+
+    // Check for detailed response triggers
+    for (const keyword of detailedKeywords) {
+      if (lowerQuery.includes(keyword)) {
+        console.log(`[Complexity] DETAILED mode triggered by keyword: "${keyword}"`);
+        return ResponseMode.DETAILED;
+      }
+    }
+
+    // Check for standard response triggers
+    for (const keyword of standardKeywords) {
+      if (lowerQuery.includes(keyword)) {
+        console.log(`[Complexity] STANDARD mode triggered by keyword: "${keyword}"`);
+        return ResponseMode.STANDARD;
+      }
+    }
+
+    // Check query length (longer queries often need more detailed responses)
+    const wordCount = query.trim().split(/\s+/).length;
+    if (wordCount > 15) {
+      console.log(`[Complexity] STANDARD mode triggered by word count: ${wordCount}`);
+      return ResponseMode.STANDARD;
+    }
+
+    // Check for question marks indicating complex questions
+    const questionMarks = (query.match(/\?/g) || []).length;
+    if (questionMarks > 1) {
+      console.log(`[Complexity] STANDARD mode triggered by multiple questions: ${questionMarks}`);
+      return ResponseMode.STANDARD;
+    }
+
+    // Default to quick mode for simple queries
+    console.log(`[Complexity] QUICK mode (default) for query`);
+    return ResponseMode.QUICK;
+  }
+
+  /**
+   * Detects if the current query is related to recent conversation history
+   * Uses the LLM to determine if this is a follow-up question
+   */
+  private async detectRelatedQuery(query: string): Promise<boolean> {
+    // Don't check for relatedness if there's no conversation history
+    if (this.conversationHistory.length === 0) {
+      return false;
+    }
+
+    // Get the most recent conversation turn
+    const recentTurn = this.conversationHistory[this.conversationHistory.length - 1];
+
+    // Check if the conversation is still recent (within 30 minutes)
+    const timeSinceLastQuery = Date.now() - recentTurn.timestamp;
+    if (timeSinceLastQuery > MAX_CONVERSATION_AGE_MS) {
+      return false;
+    }
+
+    // Use a simple, fast LLM to detect if this is a follow-up query
+    const llm = LLMProvider.getLLM();
+
+    const detectionPrompt = `You are analyzing whether a user's current query is a follow-up to their previous conversation.
+
+Previous conversation:
+User: "${recentTurn.query}"
+Assistant: "${recentTurn.response}"
+
+Current query: "${query}"
+
+Determine if the current query is a follow-up that references or relates to the previous conversation.
+Follow-up indicators include:
+- Pronouns referring to previous content (it, that, those, this, them, he, she, they)
+- Temporal references (yesterday, today, tomorrow, later, earlier, before, after, now, then)
+- Continuation words (also, too, as well, and, additionally, furthermore)
+- Questions about "what about", "how about"
+- Implicit context that only makes sense with previous conversation
+- References to entities or topics from the previous exchange
+
+Answer with ONLY "YES" if it's a follow-up question that needs context from the previous conversation, or "NO" if it's an independent query.`;
+
+    try {
+      const result = await llm.invoke([new HumanMessage(detectionPrompt)]);
+      const answer = result.content.toString().trim().toUpperCase();
+      return answer.includes('YES');
+    } catch (error) {
+      console.error('[MiraAgent] Error detecting related query:', error);
+      // Default to false if detection fails
+      return false;
+    }
+  }
+
+  /**
+   * Builds an enhanced query by appending relevant conversation context
+   * when a follow-up query is detected
+   */
+  private buildEnhancedQuery(query: string): string {
+    if (this.conversationHistory.length === 0) {
+      return query;
+    }
+
+    // Get the most recent conversation turn
+    const recentTurn = this.conversationHistory[this.conversationHistory.length - 1];
+
+    // Build context string
+    const contextNote = `\n\n[CONTEXT FROM PREVIOUS EXCHANGE - User previously asked: "${recentTurn.query}" and you responded: "${recentTurn.response}"]`;
+
+    return query + contextNote;
   }
 
     /**
@@ -298,9 +464,14 @@ export class MiraAgent implements Agent {
     locationInfo: string,
     notificationsContext: string,
     localtimeContext: string,
-    hasPhoto: boolean
+    hasPhoto: boolean,
+    responseMode: ResponseMode = ResponseMode.QUICK
   ): Promise<{ answer: string; needsCamera: boolean }> {
-    const llm = LLMProvider.getLLM().bindTools(this.agentTools);
+    // Get configuration for the selected response mode
+    const config = RESPONSE_CONFIGS[responseMode];
+    console.log(`[Response Mode] Using ${responseMode.toUpperCase()} mode (${config.wordLimit} words, ${config.maxTokens} tokens)`);
+
+    const llm = LLMProvider.getLLM(config.maxTokens).bindTools(this.agentTools);
     const toolNames = this.agentTools.map((tool) => tool.name + ": " + tool.description || "");
 
     const photoContext = hasPhoto
@@ -310,6 +481,7 @@ export class MiraAgent implements Agent {
     const conversationHistoryText = this.formatConversationHistory();
 
     const systemPrompt = systemPromptBlueprint
+      .replace("{response_instructions}", config.instructions)
       .replace("{tool_names}", toolNames.join("\n"))
       .replace("{location_context}", locationInfo)
       .replace("{notifications_context}", notificationsContext)
@@ -320,11 +492,15 @@ export class MiraAgent implements Agent {
     const messages: BaseMessage[] = [new SystemMessage(systemPrompt), new HumanMessage(query)];
 
     let turns = 0;
+    let output = ""; // Store last output for error logging
     while (turns < 5) {
+      console.log(`\n[Turn ${turns + 1}/5] 🤖 Invoking LLM in ${responseMode.toUpperCase()} mode...`);
       const result: AIMessage = await llm.invoke(messages);
       messages.push(result);
 
-      const output: string = result.content.toString();
+      output = result.content.toString();
+      console.log(`[Turn ${turns + 1}/5] 📝 LLM output (first 500 chars):`, output.substring(0, 500));
+      console.log(`[Turn ${turns + 1}/5] 🔧 Tool calls requested:`, result.tool_calls?.length || 0);
 
       if (result.tool_calls) {
         for (const toolCall of result.tool_calls) {
@@ -383,12 +559,25 @@ export class MiraAgent implements Agent {
 
       const finalMarker = "Final Answer:";
       if (output.includes(finalMarker)) {
+        console.log(`[Turn ${turns + 1}/5] ✅ Found "Final Answer:" marker - parsing response`);
         return this.parseOutputWithCameraFlag(output);
+      } else {
+        console.log(`[Turn ${turns + 1}/5] ⚠️  NO "Final Answer:" marker found, continuing to next turn...`);
+      }
+
+      // Warn the LLM if it's running out of turns
+      if (turns === 2) {
+        console.log(`[Turn ${turns + 1}/5] ⚠️  Adding reminder - only 2 turns remaining`);
+        messages.push(new SystemMessage("REMINDER: You have 2 turns left. Please provide your Final Answer: and Needs Camera: markers now."));
       }
 
       turns++;
     }
 
+    console.error(`\n❌ [TIMEOUT] Reached max turns (5) without "Final Answer:" marker`);
+    console.error(`❌ [TIMEOUT] Last LLM output was:`, output.substring(0, 1000));
+    console.error(`❌ [TIMEOUT] Query: "${query}"`);
+    console.error(`❌ [TIMEOUT] Response mode: ${responseMode.toUpperCase()}`);
     return { answer: "Error processing query.", needsCamera: false };
   }
 
@@ -435,8 +624,9 @@ export class MiraAgent implements Agent {
       // Extract required fields from the userContext.
       const transcriptHistory = userContext.transcript_history || "";
       const insightHistory = userContext.insight_history || "";
-      const query = userContext.query || "";
-      const photo = userContext.photo as PhotoData | null;
+      let query = userContext.query || "";
+      let photo = userContext.photo as PhotoData | null;
+      const getPhotoCallback = userContext.getPhotoCallback as (() => Promise<PhotoData | null>) | undefined;
 
       let turns = 0;
 
@@ -445,7 +635,18 @@ export class MiraAgent implements Agent {
         return { answer: "No query provided.", needsCamera: false };
       }
 
-      console.log("Query:", query);     
+      console.log("Query:", query);
+
+      // STEP 0: Detect if this is a follow-up query and enhance it with context
+      console.log(`⏱️  [+${Date.now() - startTime}ms] 🔍 Checking if query is a follow-up...`);
+      const isFollowUp = await this.detectRelatedQuery(query);
+      if (isFollowUp) {
+        console.log(`⏱️  [+${Date.now() - startTime}ms] ✅ Follow-up detected! Enhancing query with context...`);
+        query = this.buildEnhancedQuery(query);
+        console.log(`⏱️  [+${Date.now() - startTime}ms] 📝 Enhanced query:`, query);
+      } else {
+        console.log(`⏱️  [+${Date.now() - startTime}ms] ℹ️  Independent query, no context enhancement needed`);
+      }     
       console.log("Location Context:", this.locationContext);
       // Only add location context if we have a valid city
       const locationInfo = this.locationContext.city !== 'Unknown'
@@ -470,15 +671,38 @@ export class MiraAgent implements Agent {
         notificationsContext = `Recent notifications:\n${notifs}\n\n`;
       }
 
-      // STEP 1: Always run text-based agent first to classify the query
+      // STEP 1: Classify query complexity
+      console.log(`⏱️  [+${Date.now() - startTime}ms] 🔍 Classifying query complexity...`);
+      const responseMode = this.classifyQueryComplexity(query);
+      console.log(`⏱️  [+${Date.now() - startTime}ms] ✅ Response mode selected: ${responseMode.toUpperCase()}`);
+
+      // STEP 2: Run text-based agent with appropriate response mode
       console.log(`⏱️  [+${Date.now() - startTime}ms] 🚀 Running text-based classifier...`);
       const textClassifierStart = Date.now();
-      const textResult = await this.runTextBasedAgent(query, locationInfo, notificationsContext, localtimeContext, !!photo);
+      const textResult = await this.runTextBasedAgent(query, locationInfo, notificationsContext, localtimeContext, !!photo || !!getPhotoCallback, responseMode);
       console.log(`⏱️  [+${Date.now() - startTime}ms] ✅ Text classifier complete (took ${Date.now() - textClassifierStart}ms)`);
       console.log(`🤖 Camera needed:`, textResult.needsCamera);
       console.log(`🤖 Text answer:`, textResult.answer);
 
-      // STEP 2: If query needs camera AND we have a photo, run image analysis
+      // STEP 3: If query needs camera, try to get photo (wait if needed)
+      if (textResult.needsCamera && !photo && getPhotoCallback) {
+        console.log(`⏱️  [+${Date.now() - startTime}ms] 📸 Camera needed but no cached photo - waiting for photo...`);
+        try {
+          const photoWaitStart = Date.now();
+          photo = await getPhotoCallback();
+          const photoWaitDuration = Date.now() - photoWaitStart;
+          if (photo) {
+            console.log(`⏱️  [+${Date.now() - startTime}ms] ✅ Photo retrieved after ${photoWaitDuration}ms wait`);
+          } else {
+            console.log(`⏱️  [+${Date.now() - startTime}ms] ⚠️  Photo wait completed but no photo available (${photoWaitDuration}ms)`);
+          }
+        } catch (error) {
+          console.error(`⏱️  [+${Date.now() - startTime}ms] ❌ Error waiting for photo:`, error);
+          photo = null;
+        }
+      }
+
+      // STEP 4: If query needs camera AND we have a photo, run image analysis
       if (textResult.needsCamera && photo) {
         try {
           console.log(`⏱️  [+${Date.now() - startTime}ms] 📸 Camera needed - running image analysis...`);
@@ -516,7 +740,7 @@ export class MiraAgent implements Agent {
         }
       }
 
-      // STEP 3: Either no camera needed OR no photo available - return text answer
+      // STEP 5: Either no camera needed OR no photo available - return text answer
       const totalDuration = Date.now() - startTime;
       console.log(`\n${"=".repeat(60)}`);
       console.log(`⏱️  [+${totalDuration}ms] 📝 RETURNING TEXT-BASED RESPONSE`);
