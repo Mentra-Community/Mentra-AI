@@ -10,7 +10,7 @@ import { MiraAgent } from './agents';
 import { wrapText, TranscriptProcessor } from './utils';
 import { getAllToolsForUser } from './agents/tools/TpaTool';
 import { log } from 'console';
-import { Anim } from './utils/anim';
+// import { Anim } from './utils/anim';
 import { analyzeImage } from './utils/img-processor';
 import { ChatManager } from './chat/ChatManager';
 import express from 'express';
@@ -527,7 +527,7 @@ class TranscriptionManager {
 
 
 
-    const anim = new Anim(this.session);
+    // const anim = new Anim(this.session);
 
     logger.debug("processQuery called ");
     // Calculate the actual duration from transcriptionStartTime to now
@@ -661,7 +661,7 @@ class TranscriptionManager {
       if (displayQuery.length > 60) {
         displayQuery = displayQuery.slice(0, 60).trim() + ' ...';
       }
-      anim.start("Processing query: " + displayQuery); // animiation stop
+      // anim.start("Processing query: " + displayQuery); // animiation stop
       this.session.layouts.showTextWall(
         wrapText("Processing query: " + displayQuery, 30),
         { durationMs: 8000 }
@@ -739,7 +739,7 @@ class TranscriptionManager {
       }
 
       // analyzeImage(); // Removed - already called in MiraAgent.handleContext
-      anim.stop(); // animiation stop
+      // anim.stop(); // animiation stop
       isRunning = false;
 
       if (!finalAnswer) {
@@ -809,7 +809,7 @@ class TranscriptionManager {
       console.log(`${"█".repeat(70)}\n`);
 
     } catch (error) {
-      anim.stop();
+      // anim.stop();
       console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ❌ Error in processQuery`);
       logger.error(error, `[Session ${this.sessionId}]: Error processing query:`);
       this.showOrSpeakText("Sorry, there was an error processing your request.");
@@ -1045,6 +1045,26 @@ class MiraServer extends AppServer {
       }
     });
 
+    // API endpoint to clear chat history (for explicit logout/cleanup)
+    app.delete('/api/chat/clear', (req, res) => {
+      try {
+        const userId = req.query.userId as string;
+
+        if (!userId) {
+          res.status(400).json({ error: 'userId is required' });
+          return;
+        }
+
+        logger.info(`🗑️ Clearing chat data for user ${userId}`);
+        this.chatManager.cleanupUserOnDisconnect(userId);
+
+        res.json({ success: true, message: 'Chat history cleared' });
+      } catch (error) {
+        logger.error(error as Error, 'Error in /api/chat/clear:');
+        res.status(500).json({ error: 'Internal server error' });
+      }
+    });
+
     // Server-Sent Events endpoint for real-time updates
     app.get('/api/chat/stream', (req, res) => {
       const userId = req.query.userId as string;
@@ -1080,6 +1100,10 @@ class MiraServer extends AppServer {
       req.on('close', () => {
         clearInterval(keepAlive);
         this.chatManager.unregisterSSE(userId, res);
+
+        // NOTE: Chat history cleanup happens in onStop() when session ends
+        // This allows users to close/reopen webview without losing messages
+
         console.log(`[SSE] 🔌 Connection closed for user ${userId}`);
       });
     });
@@ -1184,12 +1208,21 @@ class MiraServer extends AppServer {
   // Handle session disconnection
   protected onStop(sessionId: string, userId: string, reason: string): Promise<void> {
     logger.info(`Stopping Mira service for session ${sessionId}, user ${userId}`);
+
+    // Clean up transcription manager
     const manager = this.transcriptionManagers.get(sessionId);
     if (manager) {
       manager.cleanup();
       this.transcriptionManagers.delete(sessionId);
     }
+
+    // Clean up agent for this session
     this.agentPerSession.delete(sessionId);
+
+    // Clean up chat history and user data when session stops
+    this.chatManager.cleanupUserOnDisconnect(userId);
+    logger.info(`🗑️ Cleaned up chat history for user ${userId}`);
+
     return Promise.resolve();
   }
 }

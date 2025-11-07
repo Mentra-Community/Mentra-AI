@@ -1,0 +1,107 @@
+.mira-background {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+}
+
+.mira-bg-container {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  animation: mira-rotate 12s linear infinite;
+}
+
+@keyframes mira-rotate {
+  0% {
+    transform: translate(-50%, -50%) rotate(0deg);
+  }
+  100% {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+
+.mira-circle {
+  position: absolute;
+  border-radius: 30%;
+  filter: blur(40px);
+  will-change: transform;
+  opacity: 0.5;
+}
+
+/* Blue circle - top (0°/360° - 12 o'clock) */
+.mira-circle-1 {
+  width: 304px;
+  height: 204px;
+  background: #32ade6;
+  top: 31%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 100;
+}
+
+/* Pink circle - bottom left (72° - 2:24 position) */
+.mira-circle-2 {
+  width: 204px;
+  height: 204px;
+  background: #ff607F;
+  top: 65%;
+  left: 30%;
+  transform: translate(-50%, -50%);
+}
+
+/* Red circle - bottom right (144° - 4:48 position) */
+.mira-circle-3 {
+  width: 204px;
+  height: 204px;
+  background: #ff2d55;
+  top: 65%;
+  right: 32%;
+  transform: translate(50%, -50%);
+}
+
+/* Green gradient circle - top right (216° - 7:12 position) */
+.mira-circle-4 {
+  width: 204px;
+  height: 204px;
+  background: radial-gradient(circle at center, #FF9500, #ffff00);
+  top: 45%;
+  right: 18%;
+  transform: translate(50%, -50%);
+}
+
+/* Purple circle - top left (288° - 9:36 position) */
+.mira-circle-5 {
+  width: 204px;
+  height: 204px;
+  background: #DB93FF;
+  top: 45%;
+  left: 20%;
+  transform: translate(-50%, -50%);
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .mira-bg-container {
+    animation: mira-rotate 24s linear infinite;
+  }
+}
+
+/* Performance optimization for smaller screens */
+@media (max-width: 204px) {
+  .mira-circle {
+    /* filter: blur(80px); */
+  }
+
+  .mira-circle-1,
+  .mira-circle-2,
+  .mira-circle-3,
+  .mira-circle-4,
+  .mira-circle-5 {
+    width: 300px;
+    height: 300px;
+  }
+}

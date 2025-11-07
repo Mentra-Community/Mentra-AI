@@ -383,4 +383,53 @@ export class ChatManager {
       conversationData.messages = [];
     }
   }
+
+  /**
+   * Clean up user data when they disconnect (clear messages and remove connections)
+   */
+  cleanupUserOnDisconnect(userId: string): void {
+    console.log(`[ChatManager] 🧹 Cleaning up data for disconnected user: ${userId}`);
+
+    // Clear all conversations involving this user
+    const aiRecipientId = 'mira-assistant';
+    const conversationId = this.getConversationId(userId, aiRecipientId);
+
+    // Clear the conversation messages
+    if (this.conversations.has(conversationId)) {
+      this.conversations.delete(conversationId);
+      console.log(`[ChatManager] 🗑️ Deleted conversation: ${conversationId}`);
+    }
+
+    // Remove user connections
+    if (this.userConnections.has(userId)) {
+      const userData = this.userConnections.get(userId)!;
+
+      // Close all WebSocket connections
+      userData.ws.forEach(ws => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.close();
+        }
+      });
+
+      // Close all SSE connections
+      userData.sse.forEach(res => {
+        try {
+          res.end();
+        } catch (error) {
+          console.error('[ChatManager] Error closing SSE:', error);
+        }
+      });
+
+      this.userConnections.delete(userId);
+      console.log(`[ChatManager] 🗑️ Removed all connections for user: ${userId}`);
+    }
+
+    // Clean up the agent for this user
+    if (this.agents.has(userId)) {
+      this.agents.delete(userId);
+      console.log(`[ChatManager] 🗑️ Removed agent for user: ${userId}`);
+    }
+
+    console.log(`[ChatManager] ✅ Cleanup complete for user: ${userId}`);
+  }
 }

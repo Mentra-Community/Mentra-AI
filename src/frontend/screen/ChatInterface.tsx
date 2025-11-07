@@ -1,7 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Sparkles, Menu, X, Search, Plus, MessageSquare, Sun, Moon } from 'lucide-react';
+import { Sparkles, X, Lock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import AnimatedLogo from '../components/AnimeLogo';
+import Lottie from 'lottie-react';
+import Sidebar from '../components/Sidebar';
+import MentraLogoAnimation from '../../public/figma-parth-assets/anim/Mentralogo2.json';
+import MiraBackground from '../../public/figma-parth-assets/anim/Mira-Background.json';
+import { MiraBackgroundAnimation } from '../components/MiraBackgroundAnimation';
+import ShieldIcon from '../../public/figma-parth-assets/icons/shield-icon.svg';
+import ChatIcon from '../../public/figma-parth-assets/icons/chat-icon.svg';
+import WhiteMira from '../../public/figma-parth-assets/icons/white-mira-logo.svg';
+import ColorMiraLogo from '../../public/figma-parth-assets/icons/color-mira-logo.svg';
+
+
 
 
 interface Message {
@@ -24,16 +34,40 @@ interface ChatInterfaceProps {
  * Messages are stored in memory and broadcast in real-time
  */
 function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.Element {
+  // Fun thinking words list
+  const thinkingWords = [
+    "doodling",
+    "vibing",
+    "cooking",
+    "pondering",
+    "brewing",
+    "crafting",
+    "dreaming",
+    "computing",
+    "processing",
+    "brainstorming",
+    "conjuring",
+    "imagining"
+  ];
+
   const [messages, setMessages] = useState<Message[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [thinkingWord, setThinkingWord] = useState(() =>
+    thinkingWords[Math.floor(Math.random() * thinkingWords.length)]
+  );
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  // const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [imageScale, setImageScale] = useState(1);
   const [imagePosition, setImagePosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const [isDarkMode, setIsDarkMode] = useState(true);
+  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [isPrivateMode, setIsPrivateMode] = useState(() => {
+    // Load private mode preference from localStorage
+    const saved = localStorage.getItem('mira-private-mode');
+    return saved ? JSON.parse(saved) : false;
+  });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const sseRef = useRef<EventSource | null>(null);
 
@@ -53,6 +87,26 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Sync dark mode with private mode
+  useEffect(() => {
+    setIsDarkMode(isPrivateMode);
+  }, [isPrivateMode]);
+
+  // Save private mode preference to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('mira-private-mode', JSON.stringify(isPrivateMode));
+    console.log('[ChatInterface] 💾 Saved private mode to localStorage:', isPrivateMode);
+  }, [isPrivateMode]);
+
+  // Apply dark class to root element
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [isDarkMode]);
 
   // Set up SSE connection for real-time updates
   useEffect(() => {
@@ -89,13 +143,22 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
 
         if (data.type === 'message') {
           console.log('[ChatInterface] Adding message from:', data.senderId, 'to:', data.recipientId);
-          setIsProcessing(false);
 
           const isRelevant =
             (data.senderId === userId && data.recipientId === recipientId) ||
             (data.senderId === recipientId && data.recipientId === userId);
 
           if (isRelevant) {
+            // If it's a message FROM the user (not from Mira), show processing indicator
+            if (data.senderId === userId) {
+              const randomWord = thinkingWords[Math.floor(Math.random() * thinkingWords.length)];
+              setThinkingWord(randomWord);
+              setIsProcessing(true);
+            } else {
+              // If it's Mira's response, hide processing
+              setIsProcessing(false);
+            }
+
             setMessages(prev => {
               const newMessages = [...prev, {
                 id: data.id || Date.now().toString(),
@@ -141,6 +204,8 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
           }
         } else if (data.type === 'processing') {
           console.log('[ChatInterface] 🔄 Processing indicator shown');
+          const randomWord = thinkingWords[Math.floor(Math.random() * thinkingWords.length)];
+          setThinkingWord(randomWord);
           setIsProcessing(true);
         } else if (data.type === 'idle') {
           console.log('[ChatInterface] ⏸️ Processing complete');
@@ -173,261 +238,96 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
 
 
   return (
-    <div className="h-screen flex bg-black overflow-hidden">
+    <div className={`h-screen flex overflow-hidden ${isDarkMode ? 'dark' : ''}`} style={{ backgroundColor: 'var(--background)' }}>
       {/* Sidebar */}
-      <div
-        className={`fixed inset-y-0 left-0 z-50 w-72 backdrop-blur-xl border-r transform transition-transform duration-300 ${
-          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-        } lg:relative lg:translate-x-0 flex flex-col ${
-          isDarkMode
-            ? 'bg-black/95 border-purple-500/30'
-            : 'bg-gray-50/98 border-purple-400/40'
-        }`}
-      >
-        {/* Sidebar Header */}
-        <div className={`p-3 border-b ${isDarkMode ? 'border-purple-500/30' : 'border-purple-400/30'}`}>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className={`text-sm font-semibold flex items-center gap-2 ${
-              isDarkMode ? 'text-purple-200' : 'text-purple-900'
-            }`}>
-              <MessageSquare className={`w-4 h-4 ${
-                isDarkMode ? 'text-purple-400' : 'text-purple-700'
-              }`} />
-              Conversations
-            </h2>
-            <button
-              onClick={() => setSidebarOpen(false)}
-              className={`lg:hidden p-1 rounded transition-colors ${
-                isDarkMode ? 'hover:bg-purple-500/20' : 'hover:bg-purple-300/60'
-              }`}
-            >
-              <X className={`w-4 h-4 ${
-                isDarkMode ? 'text-purple-300' : 'text-purple-800'
-              }`} />
-            </button>
-          </div>
-
-          {/* New Chat Button - Disabled/Under Construction */}
-          <button
-            disabled
-            className={`w-full rounded-lg py-2 px-3 flex items-center justify-center gap-2 text-sm border cursor-not-allowed relative ${
-              isDarkMode
-                ? 'bg-purple-600/20 text-purple-200/60 border-purple-500/30'
-                : 'bg-purple-200/60 text-purple-700/60 border-purple-400/40'
-            }`}
-            title="Under construction"
-          >
-            <Plus className="w-4 h-4" />
-            New Chat
-            <span className={`absolute -top-1 -right-1 text-[10px] px-1.5 py-0.5 rounded-full border font-medium ${
-              isDarkMode
-                ? 'bg-yellow-500/30 text-yellow-300 border-yellow-500/50'
-                : 'bg-yellow-300 text-yellow-900 border-yellow-500'
-            }`}>
-              Soon
-            </span>
-          </button>
-        </div>
-
-        {/* Search Bar - Disabled/Under Construction */}
-        <div className={`p-3 border-b ${isDarkMode ? 'border-purple-500/30' : 'border-purple-400/30'}`}>
-          <div className="relative">
-            <Search className={`absolute left-2.5 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 ${
-              isDarkMode ? 'text-purple-400/60' : 'text-purple-700/60'
-            }`} />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search (coming soon)..."
-              disabled
-              className={`w-full border rounded-lg py-1.5 pl-8 pr-3 text-sm cursor-not-allowed ${
-                isDarkMode
-                  ? 'bg-gray-900/30 border-purple-500/30 text-purple-100/60 placeholder-purple-400/60'
-                  : 'bg-white border-purple-400/40 text-purple-800/60 placeholder-purple-700/60'
-              }`}
-            />
-          </div>
-        </div>
-
-        {/* Conversation History Placeholder */}
-        <div className="flex-1 flex items-center justify-center p-4">
-          <div className="text-center">
-            <p className={`text-xs ${
-              isDarkMode ? 'text-purple-300/70' : 'text-purple-700/70'
-            }`}>
-              No conversation history
-            </p>
-            <p className={`text-[10px] mt-1 ${
-              isDarkMode ? 'text-purple-400/50' : 'text-purple-600/60'
-            }`}>
-              coming soon
-            </p>
-          </div>
-        </div>
-      </div>
+      {/* <Sidebar
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
+        isDarkMode={isDarkMode}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+      /> */}
 
       {/* Overlay for mobile */}
-      {sidebarOpen && (
+      {/* {sidebarOpen && (
         <div
           className="fixed inset-0 bg-black/80 z-40 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         ></div>
-      )}
+      )} */}
 
       {/* Main Content */}
-      <div className={`flex-1 flex flex-col relative ${
-        isDarkMode
-          ? 'bg-gradient-to-b from-black via-gray-950 to-black'
-          : 'bg-gradient-to-b from-gray-50 via-white to-gray-50'
-      }`}>
-        {/* Header */}
-        <header className={`backdrop-blur-lg px-4 py-3 flex items-center justify-between sticky z-11 w-full`}>
-          {/* Left side - Menu button */}
-          <div className="flex items-center gap-3 w-24">
-            <button
-              onClick={() => setSidebarOpen(true)}
-              className={`lg:hidden p-2 rounded-lg transition-colors ${
-                isDarkMode ? 'hover:bg-purple-500/10' : 'hover:bg-purple-100'
-              }`}
-            >
-              <Menu className={`w-5 h-5 ${isDarkMode ? 'text-purple-300' : 'text-purple-600'}`} />
-            </button>
-          </div>
-
-          {/* Center - Logo */}
-
-
-          {/* Right side - Theme toggle */}
-          <div className="flex items-center gap-3 w-24 justify-end">
-            <button
-              onClick={() => setIsDarkMode(!isDarkMode)}
-              className={`p-2 rounded-lg transition-colors ${
-                isDarkMode ? 'hover:bg-purple-500/10' : 'hover:bg-purple-100'
-              }`}
-              title={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-            >
-              {isDarkMode ? (
-                <Sun className="w-5 h-5 text-purple-300" />
-              ) : (
-                <Moon className="w-5 h-5 text-purple-600" />
-              )}
-            </button>
-          </div>
-        </header>
-
+      <div className="flex-1 flex flex-col relative" style={{ backgroundColor: 'var(--background)' }}>
         {/* Main Content Area */}
-        <div className="flex-1 overflow-y-auto relative ">
-          {/* Stars in background - Always visible, dims when conversation starts */}
-          <motion.div
-            animate={{
-              opacity: messages.length === 0 ? 1 : 0.2
-            }} 
-            transition={{ duration: 0.8, ease: 'easeInOut' }}
-            className="absolute inset-0 pointer-events-none"
-          >
-            {[...Array(50)].map((_, i) => {
-              const randomLeft = Math.random() * 100;
-              const randomTop = Math.random() * 100;
-              const randomDelay = Math.random() * 3;
-              const randomDuration = 2 + Math.random() * 2;
-              return (
-                <div
-                  key={i}
-                  className={`absolute w-0.5 h-0.5 rounded-full ${
-                    isDarkMode ? 'bg-purple-300/30' : 'bg-purple-400/20'
-                  }`}
-                  style={{
-                    left: `${randomLeft}%`,
-                    top: `${randomTop}%`,
-                    animation: `twinkle ${randomDuration}s ease-in-out ${randomDelay}s infinite`,
-                  }}
-                />
-              );
-            })}
-          </motion.div>
+        <div className="flex-1 overflow-y-auto relative">
+          {/* Gradient background at bottom - visible only when no messages */}
+              <div
+                className="fixed inset-0 pointer-events-none overflow-hidden flex items-end justify-center h-full "
+                style={{ paddingBottom: '0px' }}
+              >
+                  {/* <Lottie
+                    animationData={MiraBackground}
+                    loop={true}
+                    autoplay={true}
+                    // className="w-[778px] -mb-[480px]"
+                    className='trans'
+                  /> */}
+                  <MiraBackgroundAnimation className='-mb-[420px]'/>
+              </div>
 
-          {/* Background glow effects - Fades out when messages appear */}
-          <AnimatePresence>
-            {messages.length === 0 && (
-              <>
-                <motion.div
-                  initial={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.8, ease: 'easeInOut' }}
-                  className="absolute inset-0 flex items-center justify-center pointer-events-none"
-                >
-                  <div className={`w-96 h-96 rounded-full blur-3xl animate-pulse ${
-                    isDarkMode ? 'bg-purple-600/10' : 'bg-purple-400/15'
-                  }`}></div>
-                </motion.div>
-                <motion.div
-                  initial={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.8, ease: 'easeInOut' }}
-                  className="absolute inset-0 flex items-center justify-center pointer-events-none"
-                >
-                  <div className={`w-64 h-64 rounded-full blur-2xl ${
-                    isDarkMode ? 'bg-purple-500/20' : 'bg-purple-300/25'
-                  }`} style={{ animation: 'pulse 3s ease-in-out infinite' }}></div>
-                </motion.div>
-              </>
-            )}
-          </AnimatePresence>
-
-          {/* Animated Logo - Shows centered when no messages, fades away when conversation starts */}
-
-
-          {/* Animated Logo and Text - Moves to top after loading, then fades out when messages appear */}
+          {/* Welcome Screen - Shows centered when no messages */}
           <AnimatePresence mode="wait">
             {messages.length === 0 && (
               <motion.div
                 key="welcome-screen"
-                initial={{ opacity: 0, y: 0 }}
-                animate={{
-                  opacity: 1,
-                  y: [0, 0, -30],
-                  transition: {
-                    opacity: { duration: 0.5 },
-                    y: { duration: 1.2, times: [0, 0.75, 1], ease: [0.4, 0, 0.2, 1] }
-                  }
-                }}
-                exit={{ opacity: 0, y: -20, transition: { duration: 0.4, ease: 'easeInOut' } }}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.5 }}
                 className="absolute inset-0 flex flex-col items-center justify-center px-6 z-10"
               >
-                {/* Animated Logo */}
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.8 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ duration: 0.5, ease: 'easeOut' }}
-                  className="mb-0"
-                >
-                  <AnimatedLogo key={`logo-${messages.length}`} size="medium" animate={true} color={isDarkMode ? '#9333ea' : '#7c3aed'} />
-                </motion.div>
+                {/* Logo - Starts in center of screen, moves up smoothly */}
+                <div className=' flex flex-col items-center -mt-[80px]'>
+                  <motion.div
+                    initial={{ y: '5vh' }}
+                    animate={{ y: 0 }}
+                    transition={{
+                      duration: 0.7,
+                      ease: [0.25, 0.1, 0.25, 1],
+                      delay: 0.3
+                    }}
+                    className="mb-[10px]"
+                  >
+                    <Lottie
+                      animationData={MentraLogoAnimation}
+                      loop={true}
+                      autoplay={true}
+                      className="w-[150px] h-[150px]"
+                    />
+                  </motion.div>
+                                    <h1 className="text-[20px] sm:text-4xl md:text-5xl lg:text-6xl font-semibold flex gap-[4px]  justify-center">
+                    {['Start', 'with', '"Hey', 'Mira"'].map((word, index) => (
+                      <motion.span
+                        key={index}
+                        initial={{ opacity: 0, filter: 'blur(10px)' }}
+                        animate={{ opacity: 1, filter: 'blur(0px)' }}
+                        transition={{
+                          duration: 0.5,
+                          ease: [0.25, 0.1, 0.25, 1],
+                          delay: 0.7 + (index * 0.15)
+                        }}
+                        style={{ color: 'var(--secondary-foreground)' }}
+                      >
+                        {word}
+                      </motion.span>
+                    ))}
+                  </h1>
 
-                {/* Text Content */}
-                <div className="flex flex-col items-center px-4">
-                  <motion.h2
-                    className={`text-2xl sm:text-3xl md:text-4xl lg:text-5xl xl:text-6xl font-bold mb-4 text-center ${
-                      isDarkMode ? 'text-purple-100' : 'text-purple-900'
-                    }`}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.4, ease: 'easeOut', delay: 0.9 }}
-                  >
-                    How can I help you?
-                  </motion.h2>
-                  <motion.p
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.4, delay: 1.1, ease: 'easeOut' }}
-                    className={`text-[12px] sm:text-base md:text-lg text-center max-w-md ${
-                      isDarkMode ? 'text-purple-300/70' : 'text-purple-700/70'
-                    }`}
-                  >
-                    Speak to your glasses
-                  </motion.p>
                 </div>
+
+
+                {/* Text Content - Words appear one by one with blur-to-focus effect */}
+
               </motion.div>
             )}
           </AnimatePresence>
@@ -453,22 +353,14 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
                     >
                       {/* Avatar and Name */}
                       <div className={`flex items-center gap-2 ${isOwnMessage ? 'flex-row-reverse' : 'flex-row'}`}>
-                        <div className="flex-shrink-0">
-                          {isOwnMessage ? (
-                            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-xs font-semibold">
-                              U
-                            </div>
-                          ) : (
-                            <div className="w-7 h-7 rounded-full bg-gradient-to-br from-purple-600 to-fuchsia-600 flex items-center justify-center">
-                              <Sparkles size={14} className="text-white" />
-                            </div>
-                          )}
+                        <div className=" ml-[8px]">
+
+                          {!isOwnMessage && (
+                            <img src={ColorMiraLogo} alt="Shield" className="w-[40px] h-[40px]" />
+
+                            )}
                         </div>
-                        <div className={`text-xs font-semibold ${
-                          isDarkMode ? 'text-purple-300/90' : 'text-purple-700'
-                        }`}>
-                          {isOwnMessage ? 'You' : 'Mira'}
-                        </div>
+                          
                       </div>
 
                       {/* Message Content */}
@@ -478,26 +370,20 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
                             <img
                               src={message.image}
                               alt="Message context"
-                              className="rounded-lg max-w-xs h-auto cursor-zoom-in hover:opacity-90 transition-opacity border border-purple-500/20"
+                              className="rounded-[8px] max-w-xs h-auto cursor-zoom-in hover:opacity-90 transition-opacity "
                               style={{ maxWidth: '200px' }}
                               onClick={() => setZoomedImage(message.image!)}
                             />
                           </div>
                         )}
-                        <div className={`text-sm leading-relaxed whitespace-pre-line p-3 rounded-lg inline-block max-w-lg ${
-                          isDarkMode
-                            ? isOwnMessage
-                              ? 'text-purple-100/80 bg-purple-600/10 border border-purple-500/30'
-                              : 'text-purple-100/80 bg-transparent'
-                            : isOwnMessage
-                              ? 'text-purple-900 bg-purple-100/50 border border-purple-300'
-                              : 'text-gray-800 bg-transparent'
+                       <div className={` text-[var(--foreground)] leading-relaxed whitespace-pre-line pt-[8px] pb-[8px] pr-[16px] pl-[16px] rounded-[16px] inline-block max-w-lg text-[16px]  ${
+                          isOwnMessage
+                            ? 'bg-[var(--primary-foreground)] rounded-br-md font-medium text-[var(--secondary-foreground:)]'
+                            : 'bg-transparent pl-0 font-medium *:text-[var(--secondary-foreground:)]'
                         }`}>
                           {message.content}
                         </div>
-                        <div className={`text-[10px] mt-1.5 ${isOwnMessage ? 'text-right' : 'text-left'} w-full ${
-                          isDarkMode ? 'text-purple-400/40' : 'text-purple-600/50'
-                        }`}>
+                        <div className={`text-[10px] ml-[15px] mt-1.5 ${isOwnMessage ? 'text-right' : 'text-left'} w-full text-gray-400`}>
                           {message.timestamp.toLocaleTimeString()}
                         </div>
                       </div>
@@ -510,31 +396,28 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
                   <motion.div
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="flex flex-col gap-2"
+                    className="flex items-center gap-2"
                   >
-                    {/* Avatar and Name */}
-                    <div className="flex items-center gap-2">
-                      <div className="flex-shrink-0">
-                        <div className="w-7 h-7 rounded-full bg-gradient-to-br from-purple-600 to-fuchsia-600 flex items-center justify-center">
-                          <Sparkles size={14} className="text-white" />
-                        </div>
-                      </div>
-                      <div className={`text-xs font-semibold ${
-                        isDarkMode ? 'text-purple-300/90' : 'text-purple-700'
-                      }`}>Mira</div>
+                    <div className="flex-shrink-0">
+                      <img src={ColorMiraLogo} alt="Shield" className="w-[40px] h-[40px]" />
                     </div>
-                    {/* Typing indicator */}
-                    <div className="ml-9 flex space-x-2">
-                      <div className={`w-2 h-2 rounded-full animate-bounce ${
-                        isDarkMode ? 'bg-purple-400/60' : 'bg-purple-600/60'
-                      }`}></div>
-                      <div className={`w-2 h-2 rounded-full animate-bounce ${
-                        isDarkMode ? 'bg-purple-400/60' : 'bg-purple-600/60'
-                      }`} style={{ animationDelay: '0.1s' }}></div>
-                      <div className={`w-2 h-2 rounded-full animate-bounce ${
-                        isDarkMode ? 'bg-purple-400/60' : 'bg-purple-600/60'
-                      }`} style={{ animationDelay: '0.2s' }}></div>
-                    </div>
+                    <motion.div
+                      className="text-sm text-gray-500 italic"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ duration: 0.3 }}
+                    >
+                      {`Mira ${thinkingWord}...`.split("").map((char, index) => (
+                        <motion.span
+                          key={index}
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          transition={{ delay: index * 0.05 }}
+                        >
+                          {char}
+                        </motion.span>
+                      ))}
+                    </motion.div>
                   </motion.div>
                 )}
 
@@ -543,6 +426,84 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
             </motion.div>
           )}
         </div>
+
+        {/* Sticky Bottom Bar */}
+        <AnimatePresence>
+          {messages.length > 0 && (
+            <motion.div
+              initial={{ y: 120, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 120, opacity: 0 }}
+              transition={{
+                type: "spring",
+                stiffness: 300,
+                damping: 30,
+                duration: 0.5
+              }}
+              className={`sticky bottom-0 left-0 right-0   h-[111px] ${
+                isDarkMode ? 'border-purple-500/20' : 'border-purple-200'
+              }`}
+            >
+              <div className="max-w-3xl mx-auto   flex items-center justify-between h-full">
+                {/* Left Button - Shield (Private Mode Toggle) */}
+                <button
+                  onClick={() => setIsPrivateMode(!isPrivateMode)}
+                  className={`ml-[24px] transition-all duration-500 ease-in-out hover:opacity-80 hover:scale-110 ${
+                    isPrivateMode ? 'opacity-100 scale-100' : 'opacity-40 scale-95'
+                  }`}
+                >
+                  <img src={ShieldIcon} alt="Shield" className="w-[40px] h-[40px]" />
+                </button>
+                <div className='flex flex-col justify-center items-center'>
+                  <AnimatePresence mode="wait">
+                    {isPrivateMode ? (
+                      <motion.div
+                        key="lock-icon"
+                        initial={{ opacity: 0, scale: 0.8, rotateZ: -20 }}
+                        animate={{ opacity: 1, scale: 1, rotateZ: 0 }}
+                        exit={{ opacity: 0, scale: 0.8, rotateZ: 20 }}
+                        transition={{ duration: 0.4, ease: "easeInOut" }}
+                      >
+                        <Lock className="w-[32px] h-[32px]" style={{ color: isDarkMode ? '#ffffff' : 'var(--background)' }} />
+                      </motion.div>
+                    ) : (
+                      <motion.img
+                        key="mira-icon"
+                        src={WhiteMira}
+                        alt="Mira"
+                        className="w-[32px] h-[32px]"
+                        initial={{ opacity: 0, scale: 0.8, rotateZ: 20 }}
+                        animate={{ opacity: 1, scale: 1, rotateZ: 0 }}
+                        exit={{ opacity: 0, scale: 0.8, rotateZ: -20 }}
+                        transition={{ duration: 0.4, ease: "easeInOut" }}
+                      />
+                    )}
+                  </AnimatePresence>
+
+                  <motion.div
+                    key={isPrivateMode ? 'private-text' : 'mira-text'}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.5, ease: "easeOut" }}
+                    className={`text-[18px] mt-[4px] font-extralight transition-colors duration-`}
+                  >
+                    {isPrivateMode ? 'Private Chat' : 'Start with "Hey Mira"'}
+                  </motion.div>
+                </div>
+
+                {/* Right Button - Chat */}
+                <button
+                  onClick={() => setIsPrivateMode(false)}
+                  className={`mr-[24px] transition-all duration-500 ease-in-out hover:opacity-80 hover:scale-110 ${
+                    !isPrivateMode ? 'opacity-100 scale-100' : 'opacity-40 scale-95'
+                  }`}
+                >
+                  <img src={ChatIcon} alt="Chat" className="w-[40px] h-[40px]" />
+                </button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Image Zoom Modal */}
@@ -620,7 +581,7 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
             />
             {/* Close button */}
             <button
-              className="absolute top-4 right-4 text-white bg-purple-600/80 hover:bg-purple-600 backdrop-blur-sm rounded-full p-3 transition-all shadow-lg z-10"
+              className="absolute top-4 left-4 w-[40px] h-[40px] bg-[var(--background)] backdrop-blur-sm rounded-full flex justify-center items-center z-10"
               onClick={() => {
                 setZoomedImage(null);
                 setImageScale(1);
@@ -628,41 +589,35 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
                 setIsDragging(false);
               }}
             >
-              <X size={20} />
+              <X size={20} color='var(--foreground)'/>
             </button>
             {/* Zoom controls */}
-            <div className="absolute bottom-20 left-1/2 transform -translate-x-1/2 flex gap-2">
+            <div className="absolute bottom-20 left-1/2 transform -translate-x-1/2 flex justify-between items-center bg-[var(--background)] w-[200px] h-[56px] rounded-full px-[24px] py-[16px]">
               <button
-                className="text-white bg-purple-600/80 hover:bg-purple-600 backdrop-blur-sm rounded-full p-2 transition-all shadow-lg"
                 onClick={() => setImageScale(prev => Math.max(0.5, prev - 0.2))}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="11" cy="11" r="8"></circle>
-                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                  <line x1="8" y1="11" x2="14" y2="11"></line>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" color='var(--foreground)'>
+                  <path d="M20.9999 20.9999L16.6499 16.6499M8 11H14M19 11C19 15.4183 15.4183 19 11 19C6.58172 19 3 15.4183 3 11C3 6.58172 6.58172 3 11 3C15.4183 3 19 6.58172 19 11Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
               </button>
               <button
-                className="text-white bg-purple-600/80 hover:bg-purple-600 backdrop-blur-sm rounded-full p-2 transition-all shadow-lg"
                 onClick={() => {
                   setImageScale(1);
                   setImagePosition({ x: 0, y: 0 });
                 }}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
-                  <polyline points="9 22 9 12 15 12 15 22"></polyline>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" color='var(--foreground)'>
+                  <path d="M2 12H5M5 12C5 15.866 8.13401 19 12 19M5 12C5 8.13401 8.13401 5 12 5M19 12H22M19 12C19 15.866 15.866 19 12 19M19 12C19 8.13401 15.866 5 12 5M12 2V5M12 19V22M15 12C15 13.6569 13.6569 15 12 15C10.3431 15 9 13.6569 9 12C9 10.3431 10.3431 9 12 9C13.6569 9 15 10.3431 15 12Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
               </button>
               <button
-                className="text-white bg-purple-600/80 hover:bg-purple-600 backdrop-blur-sm rounded-full p-2 transition-all shadow-lg"
                 onClick={() => setImageScale(prev => Math.min(5, prev + 0.2))}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="11" cy="11" r="8"></circle>
-                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>z
-                  <line x1="11" y1="8" x2="11" y2="14"></line>
-                  <line x1="8" y1="11" x2="14" y2="11"></line>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" color='var(--foreground)'>
+                  <path d="M3 10C3 10.9193 3.18106 11.8295 3.53284 12.6788C3.88463 13.5281 4.40024 14.2997 5.05025 14.9497C5.70026 15.5998 6.47194 16.1154 7.32122 16.4672C8.1705 16.8189 9.08075 17 10 17C10.9193 17 11.8295 16.8189 12.6788 16.4672C13.5281 16.1154 14.2997 15.5998 14.9497 14.9497C15.5998 14.2997 16.1154 13.5281 16.4672 12.6788C16.8189 11.8295 17 10.9193 17 10C17 9.08075 16.8189 8.1705 16.4672 7.32122C16.1154 6.47194 15.5998 5.70026 14.9497 5.05025C14.2997 4.40024 13.5281 3.88463 12.6788 3.53284C11.8295 3.18106 10.9193 3 10 3C9.08075 3 8.1705 3.18106 7.32122 3.53284C6.47194 3.88463 5.70026 4.40024 5.05025 5.05025C4.40024 5.70026 3.88463 6.47194 3.53284 7.32122C3.18106 8.1705 3 9.08075 3 10Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M7 10H13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M10 7V13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  <path d="M21 21L15 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
                 </svg>
               </button>
             </div>
@@ -674,38 +629,6 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
         </motion.div>
       )}
 
-      <style>{`
-        @keyframes float {
-          0%, 100% {
-            transform: translateY(0px);
-          }
-          50% {
-            transform: translateY(-10px);
-          }
-        }
-
-        @keyframes sparkle {
-          0%, 100% {
-            transform: scale(1) rotate(0deg);
-            opacity: 1;
-          }
-          50% {
-            transform: scale(1.1) rotate(5deg);
-            opacity: 0.8;
-          }
-        }
-
-        @keyframes twinkle {
-          0%, 100% {
-            opacity: 0.2;
-            transform: scale(1);
-          }
-          50% {
-            opacity: 0.8;
-            transform: scale(1.5);
-          }
-        }
-      `}</style>
       
     </div>
   );

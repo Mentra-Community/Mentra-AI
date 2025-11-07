@@ -58,6 +58,7 @@
     "express": "^4.21.2",
     "framer-motion": "^12.23.24",
     "langchain": "^0.3.24",
+    "lottie-react": "^2.4.1",
     "lucide-react": "^0.545.0",
     "path": "^0.12.7",
     "pinyin-pro": "^3.26.0",
