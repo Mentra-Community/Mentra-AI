@@ -42,17 +42,17 @@ interface ResponseConfig {
 const RESPONSE_CONFIGS: Record<ResponseMode, ResponseConfig> = {
   [ResponseMode.QUICK]: {
     wordLimit: 15,
-    maxTokens: 300,
+    maxTokens: 1000, // for now this works but should be set to 600 ... 300 was too low
     instructions: 'Always keep answers under 15 words and never break character. Use telegraph style writing.'
   },
   [ResponseMode.STANDARD]: {
     wordLimit: 75,
-    maxTokens: 600,
+    maxTokens: 1200,
     instructions: 'Provide a clear, comprehensive answer in 50-75 words. Be informative yet concise, giving enough detail to fully address the query.'
   },
   [ResponseMode.DETAILED]: {
     wordLimit: 200,
-    maxTokens: 1000,
+    maxTokens: 1400,
     instructions: 'Provide a thorough, detailed explanation in 150-200 words. Include relevant context, examples, and comprehensive information. Structure your response clearly with proper explanations.'
   }
 };
@@ -89,7 +89,12 @@ Utilize available tools when necessary and adhere to the following guidelines:
 Tools:
 {tool_names}
 
-Remember to always include both the Final Answer: and Needs Camera: markers in your final response.`;
+**CRITICAL FORMAT REQUIREMENT - YOU MUST FOLLOW THIS:**
+Every response MUST end with these exact markers:
+Final Answer: <your concise answer here>
+Needs Camera: true/false
+
+Do NOT end your response without these markers. Even if you use tools multiple times, you MUST always conclude with a Final Answer. This is MANDATORY and NON-NEGOTIABLE. Responses without "Final Answer:" will be rejected.`;
 
 // Conversation memory configuration
 const MAX_CONVERSATION_HISTORY = 10; // Keep last 10 exchanges (20 messages)
@@ -487,11 +492,15 @@ Answer with ONLY "YES" if it's a follow-up question that needs context from the 
     const messages: BaseMessage[] = [new SystemMessage(systemPrompt), new HumanMessage(query)];
 
     let turns = 0;
+    let output = ""; // Store last output for error logging
     while (turns < 5) {
+      console.log(`\n[Turn ${turns + 1}/5] 🤖 Invoking LLM in ${responseMode.toUpperCase()} mode...`);
       const result: AIMessage = await llm.invoke(messages);
       messages.push(result);
 
-      const output: string = result.content.toString();
+      output = result.content.toString();
+      console.log(`[Turn ${turns + 1}/5] 📝 LLM output (first 500 chars):`, output.substring(0, 500));
+      console.log(`[Turn ${turns + 1}/5] 🔧 Tool calls requested:`, result.tool_calls?.length || 0);
 
       if (result.tool_calls) {
         for (const toolCall of result.tool_calls) {
@@ -550,12 +559,25 @@ Answer with ONLY "YES" if it's a follow-up question that needs context from the 
 
       const finalMarker = "Final Answer:";
       if (output.includes(finalMarker)) {
+        console.log(`[Turn ${turns + 1}/5] ✅ Found "Final Answer:" marker - parsing response`);
         return this.parseOutputWithCameraFlag(output);
+      } else {
+        console.log(`[Turn ${turns + 1}/5] ⚠️  NO "Final Answer:" marker found, continuing to next turn...`);
+      }
+
+      // Warn the LLM if it's running out of turns
+      if (turns === 2) {
+        console.log(`[Turn ${turns + 1}/5] ⚠️  Adding reminder - only 2 turns remaining`);
+        messages.push(new SystemMessage("REMINDER: You have 2 turns left. Please provide your Final Answer: and Needs Camera: markers now."));
       }
 
       turns++;
     }
 
+    console.error(`\n❌ [TIMEOUT] Reached max turns (5) without "Final Answer:" marker`);
+    console.error(`❌ [TIMEOUT] Last LLM output was:`, output.substring(0, 1000));
+    console.error(`❌ [TIMEOUT] Query: "${query}"`);
+    console.error(`❌ [TIMEOUT] Response mode: ${responseMode.toUpperCase()}`);
     return { answer: "Error processing query.", needsCamera: false };
   }
 

@@ -21,7 +21,9 @@ const AUGMENTOS_API_KEY = process.env.AUGMENTOS_API_KEY;
 const LOCATIONIQ_TOKEN = process.env.LOCATIONIQ_TOKEN;
 
 const PROCESSING_SOUND_URL = "https://mira.augmentos.cloud/popping.mp3";
-const START_LISTENING_SOUND_URL = "https://mira.augmentos.cloud/start.mp3";
+// const START_LISTENING_SOUND_URL = "https://mira.augmentos.cloud/start.mp3";
+
+const START_LISTENING_SOUND_URL = "https://general.dev.tpa.ngrok.app/mira-on.wav";
 
 if (!AUGMENTOS_API_KEY) {
   throw new Error('AUGMENTOS_API_KEY is not set');
@@ -51,7 +53,7 @@ const explicitWakeWords = [
   "hey mear", "he mear", "hey miras", "he miras", "hey miora", "he miora", "hey miri", "he miri",
   "hey maura", "he maura", "hey maya", "he maya", "hey moora", "he moora",
   "hey mihrah", "he mihrah", "ay mira", "ey mira", "yay mira", "hey mihra",
-  "hey mera", "hey mira", "hey mila", "hey mirra", "hey amir", "hey amira",
+  "hey mera", "hey mira", "hey mila", "hey mirra", "hey amir", "hey amira", "hey mary",
 ];
 
 /**
@@ -305,8 +307,7 @@ class TranscriptionManager {
         console.log(`📱 [WEBVIEW] Query: "${displayText}"`);
         console.log(`${"=".repeat(70)}\n`);
         // Store the message ID so we can update it later if we get a photo
-        this.currentQueryMessageId = this.chatManager.addUserMessage(this.userId, displayText);
-        this.chatManager.setProcessing(this.userId, true);
+
       }
       this.processQuery(text, timerDuration);
     }, timerDuration);
@@ -524,6 +525,8 @@ class TranscriptionManager {
     console.log(`⏱️  [TIMESTAMP] 🎤 processQuery START: ${new Date().toISOString()}`);
     console.log(`${"█".repeat(70)}\n`);
 
+
+
     const anim = new Anim(this.session);
 
     logger.debug("processQuery called ");
@@ -680,6 +683,11 @@ class TranscriptionManager {
       };
 
       // Process the query with the Mira agent
+          // Send query to frontend if not already sent
+    if (this.chatManager && query.trim().length > 0 && !this.currentQueryMessageId) {
+      this.currentQueryMessageId = this.chatManager.addUserMessage(this.userId, query);
+      this.chatManager.setProcessing(this.userId, true);
+    }
       const inputData = { query, photo, getPhotoCallback };
       const agentResponse = await this.miraAgent.handleContext(inputData);
 
