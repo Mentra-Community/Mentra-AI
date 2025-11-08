@@ -689,7 +689,8 @@ class TranscriptionManager {
       this.currentQueryMessageId = this.chatManager.addUserMessage(this.userId, query);
       this.chatManager.setProcessing(this.userId, true);
     }
-      const inputData = { query, photo, getPhotoCallback };
+      const hasDisplay = this.session.capabilities?.hasDisplay;
+      const inputData = { query, photo, getPhotoCallback, hasDisplay };
       const agentResponse = await this.miraAgent.handleContext(inputData);
 
       const agentEndTime = Date.now();
