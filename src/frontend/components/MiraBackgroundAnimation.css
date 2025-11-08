@@ -12,7 +12,7 @@
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  animation: mira-rotate 12s linear infinite;
+  animation: mira-rotate 22s linear infinite;
 }
 
 @keyframes mira-rotate {
@@ -26,8 +26,8 @@
 
 .mira-circle {
   position: absolute;
-  border-radius: 30%;
-  filter: blur(40px);
+  border-radius: 100%;
+  filter: blur(60px);
   will-change: transform;
   opacity: 0.5;
 }
@@ -41,46 +41,56 @@
   left: 50%;
   transform: translate(-50%, -50%);
   z-index: 100;
+  opacity: .8;
 }
 
 /* Pink circle - bottom left (72° - 2:24 position) */
 .mira-circle-2 {
-  width: 204px;
+  width: 304px;
   height: 204px;
   background: #ff607F;
   top: 65%;
   left: 30%;
-  transform: translate(-50%, -50%);
+  transform: translate(50%, -40%);
+  rotate: -52deg;
+
 }
 
 /* Red circle - bottom right (144° - 4:48 position) */
 .mira-circle-3 {
-  width: 204px;
+  width: 304px;
   height: 204px;
   background: #ff2d55;
   top: 65%;
   right: 32%;
-  transform: translate(50%, -50%);
+  transform: translate(-15%, -70%);
+  rotate: 32deg;
+
 }
 
 /* Green gradient circle - top right (216° - 7:12 position) */
 .mira-circle-4 {
-  width: 204px;
+  width: 304px;
   height: 204px;
   background: radial-gradient(circle at center, #FF9500, #ffff00);
   top: 45%;
   right: 18%;
-  transform: translate(50%, -50%);
+  transform: translate(-20%, -90%);
+  rotate: 70deg;
+  opacity: .5;
+
+  
 }
 
 /* Purple circle - top left (288° - 9:36 position) */
 .mira-circle-5 {
-  width: 204px;
+  width: 304px;
   height: 204px;
   background: #DB93FF;
   top: 45%;
   left: 20%;
-  transform: translate(-50%, -50%);
+  transform: translate(30%, -70%);
+  rotate: -80deg;
 }
 
 /* Reduced motion support */

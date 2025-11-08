@@ -272,7 +272,7 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
                     // className="w-[778px] -mb-[480px]"
                     className='trans'
                   /> */}
-                  <MiraBackgroundAnimation className='-mb-[420px]'/>
+                  <MiraBackgroundAnimation className='-mb-[500px]'/>
               </div>
 
           {/* Welcome Screen - Shows centered when no messages */}
@@ -448,11 +448,11 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
                 {/* Left Button - Shield (Private Mode Toggle) */}
                 <button
                   onClick={() => setIsPrivateMode(!isPrivateMode)}
-                  className={`ml-[24px] transition-all duration-500 ease-in-out hover:opacity-80 hover:scale-110 ${
+                  className={`rounded-full ml-[24px] transition-all duration-500 ease-in-out hover:opacity-80 hover:scale-110 ${
                     isPrivateMode ? 'opacity-100 scale-100' : 'opacity-40 scale-95'
                   }`}
                 >
-                  <img src={ShieldIcon} alt="Shield" className="w-[40px] h-[40px]" />
+                  <img src={ShieldIcon} alt="Shield" className="w-[40px] h-[40px] drop-shadow-[0_0_8px_rgba(0,0,0,0.4)]" />
                 </button>
                 <div className='flex flex-col justify-center items-center'>
                   <AnimatePresence mode="wait">
@@ -485,7 +485,7 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.5, ease: "easeOut" }}
-                    className={`text-[18px] mt-[4px] font-extralight transition-colors duration-`}
+                    className={`text-white text-[18px] mt-[4px] f transition-colors duration-`}
                   >
                     {isPrivateMode ? 'Private Chat' : 'Start with "Hey Mira"'}
                   </motion.div>
@@ -494,11 +494,11 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
                 {/* Right Button - Chat */}
                 <button
                   onClick={() => setIsPrivateMode(false)}
-                  className={`mr-[24px] transition-all duration-500 ease-in-out hover:opacity-80 hover:scale-110 ${
+                  className={` rounded-full mr-[24px] transition-all duration-500 ease-in-out hover:opacity-80 hover:scale-110 shadow-4xl ${
                     !isPrivateMode ? 'opacity-100 scale-100' : 'opacity-40 scale-95'
                   }`}
                 >
-                  <img src={ChatIcon} alt="Chat" className="w-[40px] h-[40px]" />
+                  <img src={ChatIcon} alt="Chat" className="w-[40px] h-[40px] drop-shadow-[0_0_8px_rgba(0,0,0,0.3)]"  />
                 </button>
               </div>
             </motion.div>

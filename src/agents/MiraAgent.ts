@@ -282,6 +282,38 @@ export class MiraAgent implements Agent {
       return false;
     }
 
+    // Check if this is a vision-related query - these should NOT be treated as follow-ups
+    // because the user might be looking at something new
+    const visionKeywords = [
+      'what am i looking at',
+      'what is this',
+      'what is that',
+      'identify this',
+      'what do you see',
+      'describe what',
+      'tell me about this',
+      'what\'s in front of me',
+      'can you see',
+      'look at this'
+    ];
+
+    const queryLower = query.toLowerCase();
+    console.log('[MiraAgent] Checking vision keywords against query:', queryLower);
+    const isVisionQuery = visionKeywords.some(keyword => {
+      const matches = queryLower.includes(keyword);
+      if (matches) {
+        console.log(`[MiraAgent] ✅ Vision keyword matched: "${keyword}"`);
+      }
+      return matches;
+    });
+
+    if (isVisionQuery) {
+      console.log('[MiraAgent] ✅ Vision query detected - treating as independent query to get fresh photo');
+      return false;
+    } else {
+      console.log('[MiraAgent] ❌ No vision keywords detected, checking LLM for follow-up detection...');
+    }
+
     // Get the most recent conversation turn
     const recentTurn = this.conversationHistory[this.conversationHistory.length - 1];
 
@@ -636,10 +668,12 @@ Answer with ONLY "YES" if it's a follow-up question that needs context from the 
       }
 
       console.log("Query:", query);
+      console.log("Query lowercase:", query.toLowerCase());
 
       // STEP 0: Detect if this is a follow-up query and enhance it with context
       console.log(`⏱️  [+${Date.now() - startTime}ms] 🔍 Checking if query is a follow-up...`);
       const isFollowUp = await this.detectRelatedQuery(query);
+      console.log(`⏱️  [+${Date.now() - startTime}ms] 🔍 Is follow-up result: ${isFollowUp}`);
       if (isFollowUp) {
         console.log(`⏱️  [+${Date.now() - startTime}ms] ✅ Follow-up detected! Enhancing query with context...`);
         query = this.buildEnhancedQuery(query);

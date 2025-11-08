@@ -89,6 +89,7 @@ const notificationsManager = new NotificationsManager();
 class TranscriptionManager {
   private isProcessingQuery: boolean = false;
   private isListeningToQuery: boolean = false;
+  private isShuttingDown: boolean = false;
   private timeoutId?: NodeJS.Timeout;
   private maxListeningTimeoutId?: NodeJS.Timeout; // 15-second hard cutoff timer
   private session: AppSession;
@@ -849,9 +850,33 @@ class TranscriptionManager {
   }
 
   private async showOrSpeakText(text: string): Promise<void> {
-    this.session.layouts.showTextWall(wrapText(text, 30), { durationMs: 5000 });
+    // Check if session is shutting down
+    if (this.isShuttingDown) {
+      this.logger.warn(`Session shutting down, skipping message: ${text.substring(0, 50)}`);
+      return;
+    }
+
+    // Check WebSocket connection state before trying to send
+    if ((this.session as any).ws?.readyState !== 1) {
+      this.logger.warn(`WebSocket not connected (state: ${(this.session as any).ws?.readyState}), skipping message: ${text.substring(0, 50)}`);
+      return;
+    }
+
+    try {
+      this.session.layouts.showTextWall(wrapText(text, 30), { durationMs: 5000 });
+    } catch (error) {
+      this.logger.error(error, `Failed to show text wall`);
+      return; // Don't try to speak if display failed
+    }
+
     const hasScreenProcess = this.session.capabilities?.hasDisplay;
     if (this.session.settings.get<boolean>("speak_response") || !hasScreenProcess) {
+      // Double-check connection state before speaking
+      if (this.isShuttingDown || (this.session as any).ws?.readyState !== 1) {
+        this.logger.warn(`Session unavailable before speaking, skipping audio`);
+        return;
+      }
+
       try {
         const result = await this.session.audio.speak(text);
         if (result.error) {
@@ -931,6 +956,9 @@ class TranscriptionManager {
    * Clean up resources when the session ends
    */
   cleanup(): void {
+    this.isShuttingDown = true;
+    this.isProcessingQuery = false;
+
     if (this.timeoutId) {
       clearTimeout(this.timeoutId);
     }
@@ -1218,6 +1246,10 @@ class MiraServer extends AppServer {
 
     // Clean up agent for this session
     this.agentPerSession.delete(sessionId);
+
+    // Clean up persistent agent for this user
+    this.agentPerUser.delete(userId);
+    logger.info(`🗑️ Cleaned up persistent agent for user ${userId}`);
 
     // Clean up chat history and user data when session stops
     this.chatManager.cleanupUserOnDisconnect(userId);
