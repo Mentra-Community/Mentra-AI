@@ -19,11 +19,20 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT) : 80;
 const PACKAGE_NAME = process.env.PACKAGE_NAME;
 const AUGMENTOS_API_KEY = process.env.AUGMENTOS_API_KEY;
 const LOCATIONIQ_TOKEN = process.env.LOCATIONIQ_TOKEN;
+const PROCESSING_SOUND_URL = process.env.PROCESSING_SOUND_URL;
+const START_LISTENING_SOUND_URL = process.env.START_LISTENING_SOUND_URL;
+const CANCEL_MIRA_SOUND_URL = process.env.CANCEL_MIRA_SOUND_URL;
 
-const PROCESSING_SOUND_URL = "https://mira.augmentos.cloud/popping.mp3";
+// const PROCESSING_SOUND_URL = "https://mira.augmentos.cloud/popping.mp3";
+// const PROCESSING_SOUND_URL = "https://general.dev.tpa.ngrok.app/mira-loading.wav";
+// const PROCESSING_SOUND_URL = "https://general.dev.tpa.ngrok.app/mira-loading.wav";
+
+
 // const START_LISTENING_SOUND_URL = "https://mira.augmentos.cloud/start.mp3";
+// const START_LISTENING_SOUND_URL = "https://general.dev.tpa.ngrok.app/mira-on-v2.wav";
 
-const START_LISTENING_SOUND_URL = "https://general.dev.tpa.ngrok.app/mira-on.wav";
+// const CANCEL_MIRA_SOUND_URL = "https://general.dev.tpa.ngrok.app/mira-off.wav";
+
 
 if (!AUGMENTOS_API_KEY) {
   throw new Error('AUGMENTOS_API_KEY is not set');
@@ -54,6 +63,15 @@ const explicitWakeWords = [
   "hey maura", "he maura", "hey maya", "he maya", "hey moora", "he moora",
   "hey mihrah", "he mihrah", "ay mira", "ey mira", "yay mira", "hey mihra",
   "hey mera", "hey mira", "hey mila", "hey mirra", "hey amir", "hey amira", "hey mary",
+];
+
+// Cancellation phrases that cancel Mira activation
+const cancellationPhrases = [
+  "never mind", "nevermind", "cancel", "stop", "ignore that",
+  "that was a mistake", "didn't want to activate you",
+  "didn't mean to activate you", "false alarm", "go away",
+  "not you", "wasn't talking to you", "ignore", "disregard",
+  "didn't mean to", "didn't want to", "wasn't for you"
 ];
 
 /**
@@ -217,6 +235,43 @@ class TranscriptionManager {
     }
 
     if (!this.isListeningToQuery) {
+      // Check for cancellation phrases before starting to listen
+      const queryAfterWakeWord = this.removeWakeWord(text).toLowerCase().trim();
+      const isCancellation = cancellationPhrases.some(phrase =>
+        queryAfterWakeWord.includes(phrase)
+      );
+
+      if (isCancellation) {
+        this.logger.debug("Cancellation phrase detected, aborting query");
+
+        // Play cancellation sound
+        const hasScreenCancel = this.session.capabilities?.hasDisplay;
+        if (this.session.settings.get<boolean>("speak_response") || !hasScreenCancel) {
+          this.session.audio.playAudio({audioUrl: CANCEL_MIRA_SOUND_URL}).catch((err: any) => {
+            this.logger.debug('Cancellation audio failed:', err);
+          });
+        }
+
+        // Clear display
+        this.session.layouts.showTextWall("Cancelled", { durationMs: 2000 });
+
+        // Reset state - DO NOT return early without cleanup!
+        this.isListeningToQuery = false;
+        this.isProcessingQuery = false;
+        this.transcriptionStartTime = 0;
+        if (this.timeoutId) {
+          clearTimeout(this.timeoutId);
+          this.timeoutId = undefined;
+        }
+        if (this.maxListeningTimeoutId) {
+          clearTimeout(this.maxListeningTimeoutId);
+          this.maxListeningTimeoutId = undefined;
+        }
+        this.transcriptProcessor.clear();
+
+        return; // Exit without processing
+      }
+
       // play new sound effect
       const hasScreenStart = this.session.capabilities?.hasDisplay;
       if (this.session.settings.get<boolean>("speak_response") || !hasScreenStart) {
@@ -613,6 +668,43 @@ class TranscriptionManager {
     // Remove wake word from query
     const query = this.removeWakeWord(rawCombinedText);
 
+    // Check if query is a cancellation phrase (safety net)
+    const queryCleaned = query.toLowerCase().trim();
+    const isCancellation = cancellationPhrases.some(phrase =>
+      queryCleaned.includes(phrase)
+    );
+
+    if (isCancellation) {
+      this.logger.debug("Cancellation detected in processQuery");
+
+      // Play cancellation sound
+      const hasScreenCancel = this.session.capabilities?.hasDisplay;
+      if (this.session.settings.get<boolean>("speak_response") || !hasScreenCancel) {
+        this.session.audio.playAudio({audioUrl: CANCEL_MIRA_SOUND_URL}).catch((err: any) => {
+          this.logger.debug('Cancellation audio failed:', err);
+        });
+      }
+
+      this.session.layouts.showTextWall("Cancelled", { durationMs: 2000 });
+
+      // Reset all state properly
+      this.isListeningToQuery = false;
+      this.isProcessingQuery = false;
+      this.transcriptionStartTime = 0;
+      if (this.timeoutId) {
+        clearTimeout(this.timeoutId);
+        this.timeoutId = undefined;
+      }
+      if (this.maxListeningTimeoutId) {
+        clearTimeout(this.maxListeningTimeoutId);
+        this.maxListeningTimeoutId = undefined;
+      }
+      this.transcriptProcessor.clear();
+      this.currentQueryMessageId = undefined;
+
+      return;
+    }
+
     if (query.trim().length === 0) {
       isRunning = false;
       this.session.layouts.showTextWall(
@@ -689,7 +781,8 @@ class TranscriptionManager {
       this.currentQueryMessageId = this.chatManager.addUserMessage(this.userId, query);
       this.chatManager.setProcessing(this.userId, true);
     }
-      const inputData = { query, photo, getPhotoCallback };
+      const hasDisplay = this.session.capabilities?.hasDisplay;
+      const inputData = { query, photo, getPhotoCallback, hasDisplay };
       const agentResponse = await this.miraAgent.handleContext(inputData);
 
       const agentEndTime = Date.now();

@@ -216,8 +216,17 @@ export class MiraAgent implements Agent {
   /**
    * Classifies query complexity to determine appropriate response mode
    * Uses heuristics and pattern matching for fast classification
+   *
+   * @param query - The user's query text
+   * @param forceQuick - If true, always return QUICK mode (used for display glasses with limited screen space)
    */
-  private classifyQueryComplexity(query: string): ResponseMode {
+  private classifyQueryComplexity(query: string, forceQuick: boolean = false): ResponseMode {
+    // For display glasses with limited screen space, always use QUICK mode
+    if (forceQuick) {
+      console.log(`[Complexity] QUICK mode FORCED for display glasses`);
+      return ResponseMode.QUICK;
+    }
+
     const lowerQuery = query.toLowerCase();
 
     // Keywords indicating need for detailed responses
@@ -707,8 +716,10 @@ Answer with ONLY "YES" if it's a follow-up question that needs context from the 
 
       // STEP 1: Classify query complexity
       console.log(`⏱️  [+${Date.now() - startTime}ms] 🔍 Classifying query complexity...`);
-      const responseMode = this.classifyQueryComplexity(query);
-      console.log(`⏱️  [+${Date.now() - startTime}ms] ✅ Response mode selected: ${responseMode.toUpperCase()}`);
+      // Check if this is display glasses - if so, force QUICK mode
+      const hasDisplay = userContext.hasDisplay === true;
+      const responseMode = this.classifyQueryComplexity(query, hasDisplay);
+      console.log(`⏱️  [+${Date.now() - startTime}ms] ✅ Response mode selected: ${responseMode.toUpperCase()} (hasDisplay: ${hasDisplay})`);
 
       // STEP 2: Run text-based agent with appropriate response mode
       console.log(`⏱️  [+${Date.now() - startTime}ms] 🚀 Running text-based classifier...`);
