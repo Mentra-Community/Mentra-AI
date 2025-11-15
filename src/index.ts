@@ -14,7 +14,7 @@ import { log } from 'console';
 import { analyzeImage } from './utils/img-processor';
 import { ChatManager } from './chat/ChatManager';
 import express from 'express';
-import { reverseGeocode } from './utils/GoogleMaps';
+import { reverseGeocode, getTimezone } from './utils/GoogleMaps';
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 80;
 const PACKAGE_NAME = process.env.PACKAGE_NAME;
@@ -486,46 +486,6 @@ class TranscriptionManager {
   }
 
   /**
-   * Get system timezone as fallback when LocationIQ fails
-   */
-  private getSystemTimezone(): { name: string; shortName: string; fullName: string; offsetSec: number; isDst: boolean } | null {
-    try {
-      const systemTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      if (!systemTimezone || systemTimezone === 'Unknown') {
-        return null;
-      }
-
-      const now = new Date();
-      const offsetMinutes = -now.getTimezoneOffset();
-      const offsetSec = offsetMinutes * 60;
-
-      // Get short timezone name (e.g., "PST", "PDT")
-      const shortName = now.toLocaleString('en-US', {
-        timeZone: systemTimezone,
-        timeZoneName: 'short'
-      }).split(' ').pop() || systemTimezone;
-
-      // Check if DST is active by comparing January and July offsets
-      const jan = new Date(now.getFullYear(), 0, 1);
-      const jul = new Date(now.getFullYear(), 6, 1);
-      const janOffset = -jan.getTimezoneOffset();
-      const julOffset = -jul.getTimezoneOffset();
-      const isDst = offsetMinutes === Math.max(janOffset, julOffset) && janOffset !== julOffset;
-
-      return {
-        name: systemTimezone,
-        shortName: shortName,
-        fullName: systemTimezone,
-        offsetSec: offsetSec,
-        isDst: isDst
-      };
-    } catch (error) {
-      console.warn('[Geocoding] Failed to get system timezone:', error);
-      return null;
-    }
-  }
-
-  /**
   * Handles location updates with robust error handling
   * Gracefully falls back to default values if location services fail
   */
@@ -618,8 +578,10 @@ class TranscriptionManager {
         }
       }
 
+      // Get timezone information - try LocationIQ first, then Google Maps
+      let timezoneSuccess = false;
       try {
-        // Get timezone information
+        console.log(`[Geocoding] Attempting LocationIQ timezone lookup`);
         const timezoneResponse = await fetch(
           `https://us1.locationiq.com/v1/timezone?key=${LOCATIONIQ_TOKEN}&lat=${lat}&lon=${lng}&format=json`
         );
@@ -635,23 +597,32 @@ class TranscriptionManager {
               offsetSec: timezoneData.timezone.offset_sec || 0,
               isDst: !!timezoneData.timezone.now_in_dst
             };
+            timezoneSuccess = true;
+            console.log(`[Geocoding] LocationIQ timezone success: ${locationInfo.timezone.name}`);
           }
         } else {
-          console.warn(`[Geocoding] LocationIQ timezone API failed with status: ${timezoneResponse.status}, using system timezone`);
-          // Fall back to system timezone
-          const systemTimezone = this.getSystemTimezone();
-          if (systemTimezone) {
-            locationInfo.timezone = systemTimezone;
-            console.log(`[Geocoding] Using system timezone fallback: ${systemTimezone.name}`);
-          }
+          console.warn(`[Geocoding] LocationIQ timezone API failed with status: ${timezoneResponse.status}, trying Google Maps`);
         }
       } catch (timezoneError) {
-        console.warn('[Geocoding] Timezone lookup failed, using system timezone:', timezoneError);
-        // Fall back to system timezone
-        const systemTimezone = this.getSystemTimezone();
-        if (systemTimezone) {
-          locationInfo.timezone = systemTimezone;
-          console.log(`[Geocoding] Using system timezone fallback: ${systemTimezone.name}`);
+        console.warn('[Geocoding] LocationIQ timezone lookup failed:', timezoneError);
+      }
+
+      // Fallback to Google Maps TimeZone API if LocationIQ failed
+      if (!timezoneSuccess) {
+        try {
+          console.log(`[Geocoding] Attempting Google Maps timezone lookup`);
+          const googleTimezone = await getTimezone(lat, lng);
+
+          if (googleTimezone.success && googleTimezone.timezone) {
+            locationInfo.timezone = googleTimezone.timezone;
+            console.log(`[Geocoding] Google Maps timezone success: ${googleTimezone.timezone.name}`);
+          } else {
+            console.warn(`[Geocoding] Google Maps timezone failed: ${googleTimezone.error}`);
+            // Keep the fallback timezone from initialization
+          }
+        } catch (googleTimezoneError) {
+          console.warn('[Geocoding] Google Maps timezone lookup failed:', googleTimezoneError);
+          // Keep the fallback timezone from initialization
         }
       }
 

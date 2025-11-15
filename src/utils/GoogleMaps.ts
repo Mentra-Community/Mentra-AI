@@ -143,13 +143,84 @@ export async function reverseGeocode(lat: number, lng: number): Promise<GoogleMa
   }
 }
 
+/**
+ * Get timezone information for coordinates using Google Maps TimeZone API
+ *
+ * @param lat - Latitude
+ * @param lng - Longitude
+ * @returns Timezone information including name, offset, and DST status
+ */
+export async function getTimezone(lat: number, lng: number): Promise<{
+  success: boolean;
+  timezone?: {
+    name: string;
+    shortName: string;
+    fullName: string;
+    offsetSec: number;
+    isDst: boolean;
+  };
+  error?: string;
+}> {
+  if (!GOOGLE_MAPS_API_KEY) {
+    console.warn('GOOGLE_MAPS_API_KEY not configured, skipping Google Maps timezone lookup');
+    return {
+      success: false,
+      error: 'API key not configured'
+    };
+  }
+
+  try {
+    const timestamp = Math.floor(Date.now() / 1000); // Current Unix timestamp
+    const response = await client.timezone({
+      params: {
+        location: { lat, lng },
+        timestamp: timestamp,
+        key: GOOGLE_MAPS_API_KEY,
+      },
+      timeout: 5000,
+    });
+
+    if (response.data.status !== 'OK') {
+      console.warn(`Google Maps TimeZone API failed with status: ${response.data.status}`);
+      return {
+        success: false,
+        error: response.data.status
+      };
+    }
+
+    const data = response.data;
+    const offsetSec = (data.rawOffset || 0) + (data.dstOffset || 0);
+    const isDst = (data.dstOffset || 0) !== 0;
+
+    // Format short timezone name (e.g., "PST", "PDT")
+    const shortName = data.timeZoneName || data.timeZoneId || 'Unknown';
+
+    return {
+      success: true,
+      timezone: {
+        name: data.timeZoneId || 'Unknown',
+        shortName: shortName,
+        fullName: data.timeZoneId || 'Unknown',
+        offsetSec: offsetSec,
+        isDst: isDst
+      }
+    };
+
+  } catch (error) {
+    console.error('Google Maps timezone lookup error:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    };
+  }
+}
+
 // ============================================================================
 // Future API Functions (Add as needed)
 // ============================================================================
 //
 // Example functions you can add later:
 //
-// export async function getTimezone(lat: number, lng: number) { ... }
 // export async function geocode(address: string) { ... }
 // export async function getDistanceMatrix(origin, destination) { ... }
 // export async function findNearbyPlaces(lat, lng, radius, type) { ... }
