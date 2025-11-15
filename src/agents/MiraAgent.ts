@@ -585,7 +585,7 @@ Answer with ONLY "YES" if it's a follow-up question that needs context from the 
     const toolNames = this.agentTools.map((tool) => tool.name + ": " + tool.description || "");
 
     const photoContext = hasPhoto
-      ? "IMPORTANT: Your role is to classify the query and determine if it requires visual input. For the 'Needs Camera' flag: set it to TRUE if the query requires visual input from the camera (e.g., 'what is this?', 'how many fingers?', 'what color?', 'describe what you see', 'read this'). Set it to FALSE for general knowledge queries (e.g., 'weather', 'time', 'calculations', 'facts'). If Needs Camera is TRUE, provide a brief acknowledgment as your Final Answer (e.g., 'I'll analyze that for you.') - the image analysis will provide the detailed response."
+      ? "IMPORTANT: Your role is to classify the query and determine if it requires visual input. For the 'Needs Camera' flag: set it to TRUE if the query requires visual input from the camera (e.g., 'what is this?', 'how many fingers?', 'what color?', 'describe what you see', 'read this'). Set it to FALSE for general knowledge queries (e.g., 'weather', 'time', 'calculations', 'facts'). If Needs Camera is TRUE, provide a brief acknowledgment as your Final Answer (e.g., 'I can't access the camera at this moment.') - the image analysis will provide the detailed response."
       : "";
 
     const conversationHistoryText = this.formatConversationHistory();
