@@ -486,6 +486,46 @@ class TranscriptionManager {
   }
 
   /**
+   * Get system timezone as fallback when LocationIQ fails
+   */
+  private getSystemTimezone(): { name: string; shortName: string; fullName: string; offsetSec: number; isDst: boolean } | null {
+    try {
+      const systemTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (!systemTimezone || systemTimezone === 'Unknown') {
+        return null;
+      }
+
+      const now = new Date();
+      const offsetMinutes = -now.getTimezoneOffset();
+      const offsetSec = offsetMinutes * 60;
+
+      // Get short timezone name (e.g., "PST", "PDT")
+      const shortName = now.toLocaleString('en-US', {
+        timeZone: systemTimezone,
+        timeZoneName: 'short'
+      }).split(' ').pop() || systemTimezone;
+
+      // Check if DST is active by comparing January and July offsets
+      const jan = new Date(now.getFullYear(), 0, 1);
+      const jul = new Date(now.getFullYear(), 6, 1);
+      const janOffset = -jan.getTimezoneOffset();
+      const julOffset = -jul.getTimezoneOffset();
+      const isDst = offsetMinutes === Math.max(janOffset, julOffset) && janOffset !== julOffset;
+
+      return {
+        name: systemTimezone,
+        shortName: shortName,
+        fullName: systemTimezone,
+        offsetSec: offsetSec,
+        isDst: isDst
+      };
+    } catch (error) {
+      console.warn('[Geocoding] Failed to get system timezone:', error);
+      return null;
+    }
+  }
+
+  /**
   * Handles location updates with robust error handling
   * Gracefully falls back to default values if location services fail
   */
@@ -597,10 +637,22 @@ class TranscriptionManager {
             };
           }
         } else {
-          console.warn(`LocationIQ timezone API failed with status: ${timezoneResponse.status}`);
+          console.warn(`[Geocoding] LocationIQ timezone API failed with status: ${timezoneResponse.status}, using system timezone`);
+          // Fall back to system timezone
+          const systemTimezone = this.getSystemTimezone();
+          if (systemTimezone) {
+            locationInfo.timezone = systemTimezone;
+            console.log(`[Geocoding] Using system timezone fallback: ${systemTimezone.name}`);
+          }
         }
       } catch (timezoneError) {
-        console.warn('Timezone lookup failed:', timezoneError);
+        console.warn('[Geocoding] Timezone lookup failed, using system timezone:', timezoneError);
+        // Fall back to system timezone
+        const systemTimezone = this.getSystemTimezone();
+        if (systemTimezone) {
+          locationInfo.timezone = systemTimezone;
+          console.log(`[Geocoding] Using system timezone fallback: ${systemTimezone.name}`);
+        }
       }
 
       // Update the MiraAgent with location context (partial or complete)
@@ -1018,7 +1070,7 @@ class TranscriptionManager {
       }
 
       try {
-        const result = await this.session.audio.speak(text
+        const result = await this.session.audio.speak(text, {stopOtherAudio: true}
           );
         if (result.error) {
           this.logger.error({ error: result.error }, `[Session ${this.sessionId}]: Error speaking text:`);
