@@ -81,6 +81,7 @@ Utilize available tools when necessary and adhere to the following guidelines:
 9. For context, the UTC time and date is ${new Date().toUTCString()}, but for anything involving dates or times, make sure to response using the user's local time zone. If a tool needs a date or time input, convert it from the user's local time to UTC before passing it to a tool. Always think at length with the Internal_Thinking tool when working with dates and times to make sure you are using the correct time zone and offset. IMPORTANT: When answering time queries, keep it simple - if the user just asks "what time is it?" respond with just the time (e.g., "It's 3:45 PM"). Only include timezone, location, or detailed info if the user specifically asks about timezone, location, or wants detailed time information.{timezone_context}
 10. If the user's query is location-specific (e.g., weather, news, events, or anything that depends on place), always use the user's current location context to provide the most relevant answer.
 11. IMPORTANT - Conversation History: You have access to recent conversation history below. When users ask about "our conversation", "what we talked about", "what did I ask earlier", or similar questions about past interactions, you should DIRECTLY reference the conversation history provided below - DO NOT use Smart App Control or any tools to access notes/apps. The conversation history is already available to you in this context. Simply review the exchanges and summarize what was discussed.
+12. IMPORTANT - Location Access: You have automatic access to the user's location through the smart glasses. When location context is provided below, it means you already have permission and can use this information freely. DO NOT tell users you can't access their location - the location data is already available to you in the context below.
 
 {location_context}
 {notifications_context}
@@ -122,6 +123,10 @@ export class MiraAgent implements Agent {
     city: string;
     state: string;
     country: string;
+    lat: number | null;
+    lng: number | null;
+    streetAddress?: string;
+    neighborhood?: string;
     timezone: {
       name: string;
       shortName: string;
@@ -133,6 +138,10 @@ export class MiraAgent implements Agent {
     city: 'Unknown',
     state: 'Unknown',
     country: 'Unknown',
+    lat: null,
+    lng: null,
+    streetAddress: undefined,
+    neighborhood: undefined,
     timezone: {
       name: 'Unknown',
       shortName: 'Unknown',
@@ -145,7 +154,7 @@ export class MiraAgent implements Agent {
   constructor(cloudUrl: string, userId: string) {
     // Initialize the specialized app management agent
     this.appManagementAgent = new AppManagementAgent(cloudUrl, userId);
-    
+
     this.agentTools = [
       new SearchToolForAgents(),
       new SmartAppControlTool(cloudUrl, userId),
@@ -156,6 +165,50 @@ export class MiraAgent implements Agent {
       new ThinkingTool(),
       new Calculator(),
     ];
+
+    // Initialize with system timezone as fallback
+    this.initializeSystemTimezone();
+  }
+
+  /**
+   * Initialize location context with system timezone as fallback
+   * This ensures we at least have correct time information even if GPS location is unavailable
+   */
+  private initializeSystemTimezone(): void {
+    try {
+      // Get system timezone using Intl API
+      const systemTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+      if (systemTimezone && systemTimezone !== 'Unknown') {
+        // Calculate offset in seconds
+        const now = new Date();
+        const offsetMinutes = -now.getTimezoneOffset(); // getTimezoneOffset returns opposite sign
+        const offsetSec = offsetMinutes * 60;
+
+        // Determine if DST is active (approximation based on offset changes)
+        const januaryOffset = new Date(now.getFullYear(), 0, 1).getTimezoneOffset();
+        const julyOffset = new Date(now.getFullYear(), 6, 1).getTimezoneOffset();
+        const isDst = offsetMinutes > Math.max(januaryOffset, julyOffset) * -1;
+
+        // Get short timezone name (e.g., "PST", "EST")
+        const shortName = now.toLocaleTimeString('en-US', { timeZoneName: 'short' })
+          .split(' ')
+          .pop() || 'Unknown';
+
+        this.locationContext.timezone = {
+          name: systemTimezone,
+          shortName: shortName,
+          fullName: systemTimezone,
+          offsetSec: offsetSec,
+          isDst: isDst
+        };
+
+        console.log(`[MiraAgent] Initialized with system timezone: ${systemTimezone} (${shortName})`);
+      }
+    } catch (error) {
+      console.warn('[MiraAgent] Failed to initialize system timezone:', error);
+      // Keep default "Unknown" values
+    }
   }
 
   /**
@@ -392,6 +445,10 @@ Answer with ONLY "YES" if it's a follow-up question that needs context from the 
     city: string;
     state: string;
     country: string;
+    lat?: number | null;
+    lng?: number | null;
+    streetAddress?: string;
+    neighborhood?: string;
     timezone: {
       name: string;
       shortName: string;
@@ -426,13 +483,21 @@ Answer with ONLY "YES" if it's a follow-up question that needs context from the 
 
       const isStringUnknown = (val: string) => val === 'Unknown';
       const isNumberUnknown = (val: number) => val === 0; // For offsetSec, 0 might indicate unknown
+      const isNumberNull = (val: number | null) => val === null; // For lat/lng, null indicates unknown
       const isBooleanDefault = (val: boolean) => val === false; // For isDst, false is default
+
+      // Helper to check if string is undefined/empty
+      const isStringUndefined = (val: string | undefined) => !val || val === '';
 
       // Validate and sanitize location data, preserving known values
       const safeLocationInfo = {
         city: preserveKnownValue(locationInfo?.city, this.locationContext?.city, 'Unknown', isStringUnknown),
         state: preserveKnownValue(locationInfo?.state, this.locationContext?.state, 'Unknown', isStringUnknown),
         country: preserveKnownValue(locationInfo?.country, this.locationContext?.country, 'Unknown', isStringUnknown),
+        lat: preserveKnownValue(locationInfo?.lat, this.locationContext?.lat, null, isNumberNull),
+        lng: preserveKnownValue(locationInfo?.lng, this.locationContext?.lng, null, isNumberNull),
+        streetAddress: locationInfo?.streetAddress || this.locationContext?.streetAddress,
+        neighborhood: locationInfo?.neighborhood || this.locationContext?.neighborhood,
         timezone: {
           name: preserveKnownValue(locationInfo?.timezone?.name, this.locationContext?.timezone?.name, 'Unknown', isStringUnknown),
           shortName: preserveKnownValue(locationInfo?.timezone?.shortName, this.locationContext?.timezone?.shortName, 'Unknown', isStringUnknown),
@@ -451,6 +516,10 @@ Answer with ONLY "YES" if it's a follow-up question that needs context from the 
           city: 'Unknown',
           state: 'Unknown',
           country: 'Unknown',
+          lat: null,
+          lng: null,
+          streetAddress: undefined,
+          neighborhood: undefined,
           timezone: {
             name: 'Unknown',
             shortName: 'Unknown',
@@ -691,10 +760,33 @@ Answer with ONLY "YES" if it's a follow-up question that needs context from the 
         console.log(`⏱️  [+${Date.now() - startTime}ms] ℹ️  Independent query, no context enhancement needed`);
       }     
       console.log("Location Context:", this.locationContext);
-      // Only add location context if we have a valid city
-      const locationInfo = this.locationContext.city !== 'Unknown'
-      ? `For context the User is currently in ${this.locationContext.city}, ${this.locationContext.state}, ${this.locationContext.country}. Their timezone is ${this.locationContext.timezone.name} (${this.locationContext.timezone.shortName}).\n\n`
-        : '';
+      // Build location context with all available information
+      let locationInfo = '';
+      if (this.locationContext.city !== 'Unknown' || this.locationContext.streetAddress || this.locationContext.neighborhood) {
+        const locationParts = [];
+
+        // Add detailed street/neighborhood if available (from Google Maps)
+        if (this.locationContext.streetAddress) {
+          locationParts.push(`on ${this.locationContext.streetAddress}`);
+        }
+        if (this.locationContext.neighborhood) {
+          locationParts.push(`in the ${this.locationContext.neighborhood} area`);
+        }
+
+        // Add city/state/country (from LocationIQ)
+        if (this.locationContext.city !== 'Unknown') {
+          locationParts.push(`in ${this.locationContext.city}, ${this.locationContext.state}, ${this.locationContext.country}`);
+        }
+
+        // Add timezone
+        if (this.locationContext.timezone.name !== 'Unknown') {
+          locationParts.push(`timezone: ${this.locationContext.timezone.name} (${this.locationContext.timezone.shortName})`);
+        }
+
+        if (locationParts.length > 0) {
+          locationInfo = `For context the User is currently ${locationParts.join(', ')}.\n\n`;
+        }
+      }
 
       const localtimeContext = this.locationContext.timezone.name !== 'Unknown'
         ? ` The user's local date and time is ${new Date().toLocaleString('en-US', { timeZone: this.locationContext.timezone.name })}`
