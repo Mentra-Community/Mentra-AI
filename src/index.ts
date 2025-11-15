@@ -23,7 +23,7 @@ const LOCATIONIQ_TOKEN = process.env.LOCATIONIQ_TOKEN;
 const PROCESSING_SOUND_URL = process.env.PROCESSING_SOUND_URL;
 const START_LISTENING_SOUND_URL = process.env.START_LISTENING_SOUND_URL;
 const CANCEL_MIRA_SOUND_URL = process.env.CANCEL_MIRA_SOUND_URL;
-
+ 
 // const PROCESSING_SOUND_URL = "https://mira.augmentos.cloud/popping.mp3";
 // const PROCESSING_SOUND_URL = "https://general.dev.tpa.ngrok.app/mira-loading.wav";
 // const PROCESSING_SOUND_URL = "https://general.dev.tpa.ngrok.app/mira-loading.wav";
