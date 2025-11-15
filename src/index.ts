@@ -14,6 +14,7 @@ import { log } from 'console';
 import { analyzeImage } from './utils/img-processor';
 import { ChatManager } from './chat/ChatManager';
 import express from 'express';
+import { reverseGeocode } from './utils/GoogleMaps';
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 80;
 const PACKAGE_NAME = process.env.PACKAGE_NAME;
@@ -63,6 +64,9 @@ const explicitWakeWords = [
   "hey maura", "he maura", "hey maya", "he maya", "hey moora", "he moora",
   "hey mihrah", "he mihrah", "ay mira", "ey mira", "yay mira", "hey mihra",
   "hey mera", "hey mira", "hey mila", "hey mirra", "hey amir", "hey amira", "hey mary",
+  "hey mentra", "he mentra", "hey mantra", "he mantra", "hey menta", "he menta",
+  "hey mentara", "he mentara", "hey mentera", "he mentera", "heymentra", "hey-mentra", "hey dementia",
+  "he mentioned", "hey mentioned",
 ];
 
 // Cancellation phrases that cancel Mira activation
@@ -156,7 +160,7 @@ class TranscriptionManager {
 
     const transcriptionReceiveTime = Date.now();
     console.log(`🎤 [${new Date().toISOString()}] Transcription received: "${transcriptionData.text}" (isFinal: ${transcriptionData.isFinal})`);
-
+    
     if (this.isProcessingQuery) {
       this.logger.info(`[Session ${this.sessionId}]: Query already in progress. Ignoring transcription.`);
       return;
@@ -192,7 +196,7 @@ class TranscriptionManager {
     if (this.activePhotos.has(this.sessionId)) {
       const photo = this.activePhotos.get(this.sessionId);
       if (photo) {
-        if (photo.lastPhotoTime + 5000 < Date.now()) {
+        if (photo.lastPhotoTime + 2000 < Date.now()) {
           this.activePhotos.delete(this.sessionId);
         }
       }
@@ -280,15 +284,18 @@ class TranscriptionManager {
         });
       }
       try {
+        // Non-blocking location refresh on wake word
+        // Note: Location is also continuously updated via onLocation subscription
         this.session.location.getLatestLocation({accuracy: "high"}).then(location => {
           if (location) {
+            console.log(`[Session ${this.sessionId}]: 📍 Wake-word location refresh received: lat=${location.lat}, lng=${location.lng}, accuracy=${location.accuracy}`);
             this.handleLocation(location);
           }
         }, error => {
-          console.warn(`[Session ${this.sessionId}]: Error getting location:`, error);
+          console.warn(`[Session ${this.sessionId}]: ⚠️ Error getting location on wake word:`, error);
         });
       } catch (error) {
-        console.warn(`[Session ${this.sessionId}]: Error getting location:`, error);
+        console.warn(`[Session ${this.sessionId}]: ⚠️ Exception getting location on wake word:`, error);
       }
 
       //todo _____________
@@ -489,6 +496,8 @@ class TranscriptionManager {
       city: 'Unknown',
       state: 'Unknown',
       country: 'Unknown',
+      lat: locationData.lat as number | null,
+      lng: locationData.lat as number | null,
       timezone: {
         name: 'Unknown',
         shortName: 'Unknown',
@@ -507,28 +516,66 @@ class TranscriptionManager {
         return;
       }
 
-      let locationInfo = { ...fallbackLocationContext };
+      let locationInfo = {
+        ...fallbackLocationContext,
+        lat: lat,
+        lng: lng,
+        streetAddress: undefined as string | undefined,
+        neighborhood: undefined as string | undefined
+      };
 
+      // Try Google Maps first, then fallback to LocationIQ
       try {
-        // Use LocationIQ for reverse geocoding
-        const response = await fetch(
-          `https://us1.locationiq.com/v1/reverse.php?key=${LOCATIONIQ_TOKEN}&lat=${lat}&lon=${lng}&format=json`
-        );
+        console.log(`[Geocoding] Attempting Google Maps for (${lat}, ${lng})`);
+        const googleResult = await reverseGeocode(lat, lng);
 
-        if (response.ok) {
-          const data = await response.json();
-          const address = data.address;
+        if (googleResult.success && googleResult.address) {
+          const addr = googleResult.address;
 
-          if (address) {
-            locationInfo.city = address.city || address.town || address.village || 'Unknown city';
-            locationInfo.state = address.state || 'Unknown state';
-            locationInfo.country = address.country || 'Unknown country';
-          }
+          // Store Google Maps street and neighborhood data
+          locationInfo.streetAddress = addr.streetAddress;
+          locationInfo.neighborhood = addr.neighborhood;
+
+          // Log detailed address info
+          const details = [
+            addr.streetAddress,
+            addr.neighborhood
+          ].filter(Boolean).join(', ');
+
+          console.log(`[Geocoding] Google Maps success: ${details}`);
+          if (addr.neighborhood) console.log(`[Geocoding] Neighborhood: ${addr.neighborhood}`);
+          if (addr.streetAddress) console.log(`[Geocoding] Street: ${addr.streetAddress}`);
+
+          // Still need LocationIQ for city/state/country, so throw to use fallback
+          throw new Error('Google Maps only provided street/neighborhood, using LocationIQ for city/state');
         } else {
-          console.warn(`LocationIQ reverse geocoding failed with status: ${response.status}`);
+          console.log(`[Geocoding] Google Maps failed: ${googleResult.error}, using LocationIQ`);
+          throw new Error('Google Maps unavailable, using fallback');
         }
-      } catch (geocodingError) {
-        console.warn('Reverse geocoding failed:', geocodingError);
+      } catch (googleError) {
+        // Fallback to LocationIQ if Google Maps fails
+        try {
+          console.log(`[Geocoding] Using LocationIQ for reverse geocoding`);
+          const response = await fetch(
+            `https://us1.locationiq.com/v1/reverse.php?key=${LOCATIONIQ_TOKEN}&lat=${lat}&lon=${lng}&format=json`
+          );
+
+          if (response.ok) {
+            const data = await response.json();
+            const address = data.address;
+
+            if (address) {
+              locationInfo.city = address.city || address.town || address.village || 'Unknown city';
+              locationInfo.state = address.state || 'Unknown state';
+              locationInfo.country = address.country || 'Unknown country';
+              console.log(`[Geocoding] LocationIQ success: ${locationInfo.city}, ${locationInfo.state}`);
+            }
+          } else {
+            console.warn(`[Geocoding] LocationIQ failed with status: ${response.status}`);
+          }
+        } catch (geocodingError) {
+          console.warn('[Geocoding] Both services failed:', geocodingError);
+        }
       }
 
       try {
@@ -559,7 +606,7 @@ class TranscriptionManager {
       // Update the MiraAgent with location context (partial or complete)
       this.miraAgent.updateLocationContext(locationInfo);
 
-      this.logger.debug(`User location: ${locationInfo.city}, ${locationInfo.state}, ${locationInfo.country}, ${locationInfo.timezone.name}`);
+      this.logger.debug(`User location: ${locationInfo.city}, ${locationInfo.state}, ${locationInfo.country} (${locationInfo.lat}, ${locationInfo.lng}), Timezone: ${locationInfo.timezone.name}`);
     } catch (error) {
       this.logger.error(error, 'Error processing location:');
       // Always update MiraAgent with fallback location context to ensure it continues working
@@ -971,7 +1018,8 @@ class TranscriptionManager {
       }
 
       try {
-        const result = await this.session.audio.speak(text);
+        const result = await this.session.audio.speak(text
+          );
         if (result.error) {
           this.logger.error({ error: result.error }, `[Session ${this.sessionId}]: Error speaking text:`);
         }
@@ -1290,14 +1338,13 @@ class MiraServer extends AppServer {
       const manager = this.transcriptionManagers.get(sessionId);
       manager?.initTranscriptionSubscription();
     });
-    /*
+
     session.events.onLocation((locationData) => {
       const transcriptionManager = this.transcriptionManagers.get(sessionId);
       if (transcriptionManager) {
         transcriptionManager.handleLocation(locationData);
       }
     });
-    */
 
     session.events.onPhoneNotifications((phoneNotifications) => {
       this.handlePhoneNotifications(phoneNotifications, sessionId, userId);
