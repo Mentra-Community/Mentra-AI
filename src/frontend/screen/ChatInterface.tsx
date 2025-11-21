@@ -81,12 +81,25 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
 
   // Scroll to bottom of messages
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    setTimeout(() => {
+      const container = messagesEndRef.current?.parentElement?.parentElement?.parentElement;
+      if (container && messagesEndRef.current) {
+        const targetPosition = messagesEndRef.current.offsetTop + 150;
+        container.scrollTo({ top: targetPosition, behavior: 'smooth' });
+      }
+    }, 100);
   };
 
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Scroll to bottom when returning to chat page with messages
+  useEffect(() => {
+    if (currentPage === 'chat' && messages.length > 0) {
+      scrollToBottom();
+    }
+  }, [currentPage]);
 
   // Save dark mode preference to localStorage and apply to root element
   useEffect(() => {
@@ -267,7 +280,6 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
           onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
           onSettingsClick={() => {
             setCurrentPage('settings');
-            setMessages([]); // Clear chat interface
           }}
         />
 
@@ -391,7 +403,7 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
                               alt="Message context"
                               className="rounded-[8px] max-w-xs h-auto cursor-zoom-in hover:opacity-90 transition-opacity "
                               style={{ maxWidth: '200px' }}
-                              onClick={() => setZoomedImage(message.image!)}
+                              // onClick={() => setZoomedImage(message.image!)}
                             />
                           </div>
                         )}
