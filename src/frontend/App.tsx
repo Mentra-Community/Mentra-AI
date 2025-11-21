@@ -38,7 +38,7 @@ function App(): React.JSX.Element {
   }
 
   // Handle unauthenticated state
-  if (false) {
+  if (!isAuthenticated || !userId) {
     return (
       <div className="min-h-screen flex flex-col bg-black">
         <div className="flex flex-col items-center justify-center min-h-screen text-center p-8">
