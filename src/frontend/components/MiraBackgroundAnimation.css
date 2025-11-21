@@ -1,27 +1,21 @@
-.mira-background {
-  width: 100%;
-  height: 100%;
-  position: relative;
-  overflow: hidden;
-}
 
-.mira-bg-container {
-  position: absolute;
-  width: 100%;
-  height: 100%;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  animation: mira-rotate 22s linear infinite;
-}
+
+
 
 @keyframes mira-rotate {
   0% {
-    transform: translate(-50%, -50%) rotate(0deg);
+    transform: rotate(0deg);
   }
   100% {
-    transform: translate(-50%, -50%) rotate(360deg);
+    transform: rotate(360deg);
   }
+}
+
+.mira-bg-container {
+  animation: mira-rotate 24s linear infinite;
+  position: relative;
+  width: 100%;
+  height: 100%;
 }
 
 .mira-circle {
@@ -37,7 +31,7 @@
   width: 304px;
   height: 204px;
   background: #32ade6;
-  top: 31%;
+  top: 36%;
   left: 50%;
   transform: translate(-50%, -50%);
   z-index: 100;
@@ -96,7 +90,7 @@
 /* Reduced motion support */
 @media (prefers-reduced-motion: reduce) {
   .mira-bg-container {
-    animation: mira-rotate 24s linear infinite;
+    /* animation: mira-rotate 24s linear infinite; */
   }
 }
 
