@@ -830,11 +830,70 @@ class TranscriptionManager {
         { durationMs: 8000 }
       );
 
+      // CRITICAL: Detect vision queries and force fresh photo request
+      // Vision queries should NEVER use cached photos - always get a new one
+      const visionKeywords = [
+        'what am i looking at', 'what is this', 'what is that',
+        'identify this', 'what do you see', 'describe what',
+        'tell me about this', 'what\'s in front of me', 'can you see',
+        'look at this', 'read this', 'read that', 'what color',
+        'how many', 'describe this', 'describe that', 'what does this say',
+        'what\'s this', 'what\'s that', 'whats this', 'whats that'
+      ];
+      const queryLower = query.toLowerCase();
+      const isVisionQuery = visionKeywords.some(keyword => queryLower.includes(keyword));
+
+      if (isVisionQuery) {
+        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📸 VISION QUERY DETECTED - Invalidating cached photo to force fresh capture`);
+        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📸 Matched vision keyword in query: "${query}"`);
+        // Delete cached photo to force a fresh one
+        this.activePhotos.delete(this.sessionId);
+        // Clear conversation history for vision queries to prevent context contamination
+        this.miraAgent.clearConversationHistory();
+        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 🗑️  Cleared conversation history for fresh vision query`);
+
+        // Immediately request a FRESH photo for this vision query
+        if (this.session.capabilities?.hasCamera) {
+          const freshPhotoRequestTime = Date.now();
+          console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📸 Requesting FRESH photo for vision query at timestamp: ${freshPhotoRequestTime}`);
+          const freshPhotoPromise = this.session.camera.requestPhoto({size: "small"});
+
+          freshPhotoPromise.then(photoData => {
+            const photoReceivedTime = Date.now();
+            const photoLatency = photoReceivedTime - freshPhotoRequestTime;
+            console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📸 ✅ FRESH photo received! Latency: ${photoLatency}ms`);
+            this.activePhotos.set(this.sessionId, {
+              promise: freshPhotoPromise,
+              photoData: photoData,
+              lastPhotoTime: Date.now(),
+              requestTime: freshPhotoRequestTime
+            });
+            // Auto-expire after 30 seconds
+            setTimeout(() => {
+              if (this.activePhotos.has(this.sessionId) && this.activePhotos.get(this.sessionId)?.promise === freshPhotoPromise) {
+                this.activePhotos.delete(this.sessionId);
+              }
+            }, 30000);
+          }, error => {
+            console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📸 ❌ FRESH photo request failed: ${error}`);
+            this.logger.error(error, `[Session ${this.sessionId}]: Error getting fresh photo for vision query:`);
+          });
+
+          // Store the promise immediately so getPhoto can wait for it
+          this.activePhotos.set(this.sessionId, {
+            promise: freshPhotoPromise,
+            photoData: null,
+            lastPhotoTime: Date.now(),
+            requestTime: freshPhotoRequestTime
+          });
+        }
+      }
+
       const photoStartTime = Date.now();
-      console.log(`⏱️  [+${photoStartTime - processQueryStartTime}ms] 📸 Getting cached photo (non-blocking)...`);
+      console.log(`⏱️  [+${photoStartTime - processQueryStartTime}ms] 📸 Getting photo (vision query: ${isVisionQuery})...`);
       // Get photo without waiting (non-blocking) - returns cached photo or null
       const photo = await this.getPhoto(false);
-      console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ${photo ? '✅ Cached photo retrieved' : '⚪ No cached photo available (will wait only if needed)'}`);
+      console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ${photo ? '✅ Photo retrieved' : '⚪ No photo available (will wait only if needed)'}`);
 
       const agentStartTime = Date.now();
       console.log(`⏱️  [+${agentStartTime - processQueryStartTime}ms] 🤖 Invoking MiraAgent.handleContext...`);
@@ -875,11 +934,25 @@ class TranscriptionManager {
       console.log(`🎯 needsCamera flag: ${needsCamera}`);
 
       // Update user message with photo if camera was needed (message already sent earlier)
-      if (this.chatManager && needsCamera && photo) {
+      // IMPORTANT: If we don't have the photo yet but camera was needed, try to get it from cache
+      // (the agent's getPhotoCallback would have already fetched it)
+      let finalPhoto = photo;
+      if (needsCamera && !finalPhoto) {
+        console.log(`📱 [WEBVIEW] 🔍 Camera needed but photo not available - checking cache after agent processing...`);
+        const cachedPhoto = this.activePhotos.get(this.sessionId);
+        if (cachedPhoto?.photoData) {
+          finalPhoto = cachedPhoto.photoData;
+          console.log(`📱 [WEBVIEW] ✅ Found photo in cache after agent processing`);
+        } else {
+          console.log(`📱 [WEBVIEW] ⚠️ No photo in cache - agent may not have received it yet`);
+        }
+      }
+
+      if (this.chatManager && needsCamera && finalPhoto) {
         console.log(`\n${"=".repeat(70)}`);
         console.log(`📱 [WEBVIEW] Updating message with photo for user: ${this.userId}`);
-        const photoBase64 = `data:${photo.mimeType};base64,${photo.buffer.toString('base64')}`;
-        console.log(`📱 [WEBVIEW] 📷 Including photo (${photo.mimeType}, ${photo.size} bytes) - camera was needed`);
+        const photoBase64 = `data:${finalPhoto.mimeType};base64,${finalPhoto.buffer.toString('base64')}`;
+        console.log(`📱 [WEBVIEW] 📷 Including photo (${finalPhoto.mimeType}, ${finalPhoto.size} bytes) - camera was needed`);
         console.log(`${"=".repeat(70)}\n`);
 
         // Try to update the existing message if we have its ID
@@ -896,8 +969,8 @@ class TranscriptionManager {
           console.warn(`📱 [WEBVIEW] ⚠️ No currentQueryMessageId available, creating new message`);
           this.chatManager.addUserMessage(this.userId, query, photoBase64);
         }
-      } else if (this.chatManager && needsCamera && !photo) {
-        console.log(`📱 [WEBVIEW] ⚠️ Camera was needed but no photo available`);
+      } else if (this.chatManager && needsCamera && !finalPhoto) {
+        console.log(`📱 [WEBVIEW] ⚠️ Camera was needed but no photo available even after checking cache`);
       } else if (!this.chatManager) {
         console.warn(`⚠️  [WEBVIEW] ChatManager not available - webview won't receive updates`);
       }
