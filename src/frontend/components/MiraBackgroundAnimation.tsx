@@ -7,8 +7,7 @@ interface MiraBackgroundAnimationProps {
 
 export const MiraBackgroundAnimation: React.FC<MiraBackgroundAnimationProps> = ({ className }) => {
   return (
-    <div className={`mira-background h-full ${className || ''}`}>
-      <div className="mira-bg-container">
+    <div className={"mira-bg-container flex justify-center items-center" + (className ? ` ${className}` : '')}>
         {/* Blue circle - top right */}
         <div className="mira-circle mira-circle-1"></div>
 
@@ -24,6 +23,5 @@ export const MiraBackgroundAnimation: React.FC<MiraBackgroundAnimationProps> = (
         {/* Purple circle - top left */}
         <div className="mira-circle mira-circle-5"></div>
       </div>
-    </div>
   );
 };

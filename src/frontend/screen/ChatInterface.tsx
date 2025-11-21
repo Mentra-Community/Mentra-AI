@@ -1,15 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Sparkles, X, Lock } from 'lucide-react';
+import { Sparkles, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Lottie from 'lottie-react';
 import Sidebar from '../components/Sidebar';
 import MentraLogoAnimation from '../../public/figma-parth-assets/anim/Mentralogo2.json';
 import MiraBackground from '../../public/figma-parth-assets/anim/Mira-Background.json';
 import { MiraBackgroundAnimation } from '../components/MiraBackgroundAnimation';
-import ShieldIcon from '../../public/figma-parth-assets/icons/shield-icon.svg';
-import ChatIcon from '../../public/figma-parth-assets/icons/chat-icon.svg';
-import WhiteMira from '../../public/figma-parth-assets/icons/white-mira-logo.svg';
 import ColorMiraLogo from '../../public/figma-parth-assets/icons/color-mira-logo.svg';
+import Settings from './Settings';
+import Header from '../components/Header';
+import BottomHeader from '../components/BottomHeader';
 
 
 
@@ -62,12 +62,12 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
   const [imagePosition, setImagePosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const [isDarkMode, setIsDarkMode] = useState(false);
-  const [isPrivateMode, setIsPrivateMode] = useState(() => {
-    // Load private mode preference from localStorage
-    const saved = localStorage.getItem('mira-private-mode');
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    // Load dark mode preference from localStorage
+    const saved = localStorage.getItem('mira-dark-mode');
     return saved ? JSON.parse(saved) : false;
   });
+  const [currentPage, setCurrentPage] = useState<'chat' | 'settings'>('chat');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const sseRef = useRef<EventSource | null>(null);
 
@@ -81,26 +81,31 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
 
   // Scroll to bottom of messages
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    setTimeout(() => {
+      const container = messagesEndRef.current?.parentElement?.parentElement?.parentElement;
+      if (container && messagesEndRef.current) {
+        const targetPosition = messagesEndRef.current.offsetTop + 150;
+        container.scrollTo({ top: targetPosition, behavior: 'smooth' });
+      }
+    }, 100);
   };
 
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
 
-  // Sync dark mode with private mode
+  // Scroll to bottom when returning to chat page with messages
   useEffect(() => {
-    setIsDarkMode(isPrivateMode);
-  }, [isPrivateMode]);
+    if (currentPage === 'chat' && messages.length > 0) {
+      scrollToBottom();
+    }
+  }, [currentPage]);
 
-  // Save private mode preference to localStorage whenever it changes
+  // Save dark mode preference to localStorage and apply to root element
   useEffect(() => {
-    localStorage.setItem('mira-private-mode', JSON.stringify(isPrivateMode));
-    console.log('[ChatInterface] 💾 Saved private mode to localStorage:', isPrivateMode);
-  }, [isPrivateMode]);
+    localStorage.setItem('mira-dark-mode', JSON.stringify(isDarkMode));
+    console.log('[ChatInterface] 💾 Saved dark mode to localStorage:', isDarkMode);
 
-  // Apply dark class to root element
-  useEffect(() => {
     if (isDarkMode) {
       document.documentElement.classList.add('dark');
     } else {
@@ -237,6 +242,17 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
   }, [userId, recipientId]);
 
 
+  // Render Settings page if on settings, otherwise render chat
+  if (currentPage === 'settings') {
+    return (
+      <Settings
+        onBack={() => setCurrentPage('chat')}
+        isDarkMode={isDarkMode}
+        onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
+      />
+    );
+  }
+
   return (
     <div className={`h-screen flex overflow-hidden ${isDarkMode ? 'dark' : ''}`} style={{ backgroundColor: 'var(--background)' }}>
       {/* Sidebar */}
@@ -258,21 +274,23 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col relative" style={{ backgroundColor: 'var(--background)' }}>
+        {/* Header */}
+        <Header
+          isDarkMode={isDarkMode}
+          onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
+          onSettingsClick={() => {
+            setCurrentPage('settings');
+          }}
+        />
+
         {/* Main Content Area */}
         <div className="flex-1 overflow-y-auto relative">
           {/* Gradient background at bottom - visible only when no messages */}
               <div
-                className="fixed inset-0 pointer-events-none overflow-hidden flex items-end justify-center h-full "
-                style={{ paddingBottom: '0px' }}
+                className="fixed bottom-0 left-0 right-0 pointer-events-none flex justify-center"
+                style={{ height: '1000px', transform: 'translateY(660px)' }}
               >
-                  {/* <Lottie
-                    animationData={MiraBackground}
-                    loop={true}
-                    autoplay={true}
-                    // className="w-[778px] -mb-[480px]"
-                    className='trans'
-                  /> */}
-                  <MiraBackgroundAnimation className='-mb-[500px]'/>
+                <MiraBackgroundAnimation />
               </div>
 
           {/* Welcome Screen - Shows centered when no messages */}
@@ -306,7 +324,7 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
                     />
                   </motion.div>
                                     <h1 className="text-[20px] sm:text-4xl md:text-5xl lg:text-6xl font-semibold flex gap-[4px]  justify-center">
-                    {['Start', 'with', '"Hey', 'Mira"'].map((word, index) => (
+                    {['Say', '"Hey', 'Mira"'].map((word, index) => (
                       <motion.span
                         key={index}
                         initial={{ opacity: 0, filter: 'blur(10px)' }}
@@ -323,6 +341,19 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
                     ))}
                   </h1>
 
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{
+                      duration: 0.6,
+                      ease: [0.25, 0.1, 0.25, 1],
+                      delay: 1.15
+                    }}
+                    className='text-[14px] text-[#A3A3A3] mt-[8px]'
+                  >
+                    Then ask a question.
+                  </motion.div>
+
                 </div>
 
 
@@ -338,7 +369,7 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, ease: 'easeOut' }}
-              className="px-4 py-6 relative z-20"
+              className="px-[24px] py-6 pb-[150px] relative z-20"
             >
               <div className="max-w-3xl mx-auto space-y-6">
                 {messages.map((message, index) => {
@@ -372,19 +403,19 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
                               alt="Message context"
                               className="rounded-[8px] max-w-xs h-auto cursor-zoom-in hover:opacity-90 transition-opacity "
                               style={{ maxWidth: '200px' }}
-                              onClick={() => setZoomedImage(message.image!)}
+                              // onClick={() => setZoomedImage(message.image!)}
                             />
                           </div>
                         )}
                        <div className={` text-[var(--foreground)] leading-relaxed whitespace-pre-line pt-[8px] pb-[8px] pr-[16px] pl-[16px] rounded-[16px] inline-block max-w-lg text-[16px]  ${
                           isOwnMessage
-                            ? 'bg-[var(--primary-foreground)] rounded-br-md font-medium text-[var(--secondary-foreground:)]'
+                            ? 'bg-[var(--primary-foreground)] font-medium text-[var(--secondary-foreground:)]'
                             : 'bg-transparent pl-0 font-medium *:text-[var(--secondary-foreground:)]'
                         }`}>
                           {message.content}
                         </div>
-                        <div className={`text-[10px] ml-[15px] mt-1.5 ${isOwnMessage ? 'text-right' : 'text-left'} w-full text-gray-400`}>
-                          {message.timestamp.toLocaleTimeString()}
+                        <div className={`text-[12px] ml-[15px] mt-1.5 ${isOwnMessage ? 'text-right' : 'text-left'} w-full text-gray-400`}>
+                          {new Date(message.timestamp).toLocaleTimeString()}
                         </div>
                       </div>
                     </motion.div>
@@ -427,83 +458,9 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
           )}
         </div>
 
-        {/* Sticky Bottom Bar */}
-        <AnimatePresence>
-          {messages.length > 0 && (
-            <motion.div
-              initial={{ y: 120, opacity: 0 }}
-              animate={{ y: 0, opacity: 1 }}
-              exit={{ y: 120, opacity: 0 }}
-              transition={{
-                type: "spring",
-                stiffness: 300,
-                damping: 30,
-                duration: 0.5
-              }}
-              className={`sticky bottom-0 left-0 right-0   h-[111px] ${
-                isDarkMode ? 'border-purple-500/20' : 'border-purple-200'
-              }`}
-            >
-              <div className="max-w-3xl mx-auto   flex items-center justify-between h-full">
-                {/* Left Button - Shield (Private Mode Toggle) */}
-                <button
-                  onClick={() => setIsPrivateMode(!isPrivateMode)}
-                  className={`rounded-full ml-[24px] transition-all duration-500 ease-in-out hover:opacity-80 hover:scale-110 ${
-                    isPrivateMode ? 'opacity-100 scale-100' : 'opacity-40 scale-95'
-                  }`}
-                >
-                  <img src={ShieldIcon} alt="Shield" className="w-[40px] h-[40px] drop-shadow-[0_0_8px_rgba(0,0,0,0.4)]" />
-                </button>
-                <div className='flex flex-col justify-center items-center'>
-                  <AnimatePresence mode="wait">
-                    {isPrivateMode ? (
-                      <motion.div
-                        key="lock-icon"
-                        initial={{ opacity: 0, scale: 0.8, rotateZ: -20 }}
-                        animate={{ opacity: 1, scale: 1, rotateZ: 0 }}
-                        exit={{ opacity: 0, scale: 0.8, rotateZ: 20 }}
-                        transition={{ duration: 0.4, ease: "easeInOut" }}
-                      >
-                        <Lock className="w-[32px] h-[32px]" style={{ color: isDarkMode ? '#ffffff' : 'var(--background)' }} />
-                      </motion.div>
-                    ) : (
-                      <motion.img
-                        key="mira-icon"
-                        src={WhiteMira}
-                        alt="Mira"
-                        className="w-[32px] h-[32px]"
-                        initial={{ opacity: 0, scale: 0.8, rotateZ: 20 }}
-                        animate={{ opacity: 1, scale: 1, rotateZ: 0 }}
-                        exit={{ opacity: 0, scale: 0.8, rotateZ: -20 }}
-                        transition={{ duration: 0.4, ease: "easeInOut" }}
-                      />
-                    )}
-                  </AnimatePresence>
+        {/* Bottom Header */}
+        <BottomHeader isDarkMode={isDarkMode} isVisible={messages.length > 0} />
 
-                  <motion.div
-                    key={isPrivateMode ? 'private-text' : 'mira-text'}
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.5, ease: "easeOut" }}
-                    className={`text-white text-[18px] mt-[4px] f transition-colors duration-`}
-                  >
-                    {isPrivateMode ? 'Private Chat' : 'Start with "Hey Mira"'}
-                  </motion.div>
-                </div>
-
-                {/* Right Button - Chat */}
-                <button
-                  onClick={() => setIsPrivateMode(false)}
-                  className={` rounded-full mr-[24px] transition-all duration-500 ease-in-out hover:opacity-80 hover:scale-110 shadow-4xl ${
-                    !isPrivateMode ? 'opacity-100 scale-100' : 'opacity-40 scale-95'
-                  }`}
-                >
-                  <img src={ChatIcon} alt="Chat" className="w-[40px] h-[40px] drop-shadow-[0_0_8px_rgba(0,0,0,0.3)]"  />
-                </button>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
       </div>
 
       {/* Image Zoom Modal */}
