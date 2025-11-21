@@ -27,9 +27,9 @@ function Settings({ onBack, isDarkMode, onToggleDarkMode }: SettingsProps): Reac
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5 }}
-        className="flex-1 px-[24px] pt-[24px]"
+        className="flex-1 px-[24px] pt-[24px] space-y-3"
       >
-        {/* Model Setting Row */}
+        {/* Conversation Model Setting Row */}
         <div
           className="flex items-center justify-between px-[16px] rounded-[16px] h-[56px]"
           style={{ backgroundColor: 'var(--primary-foreground)' }}
@@ -38,13 +38,32 @@ function Settings({ onBack, isDarkMode, onToggleDarkMode }: SettingsProps): Reac
             className="text-[14px] font-medium font-semibold"
             style={{ color: 'var(--secondary-foreground)' }}
           >
-            Model
+            Conversation Model
           </span>
           <span
-            className="text-[14px]  font-normal"
+            className="text-[14px] font-normal"
             style={{ color: 'var(--secondary-foreground)' }}
           >
-            Gemini Flash Lite 4.0
+            GPT-4.1-mini
+          </span>
+        </div>
+
+        {/* Vision Model Setting Row */}
+        <div
+          className="flex items-center justify-between px-[16px] rounded-[16px] h-[56px]"
+          style={{ backgroundColor: 'var(--primary-foreground)' }}
+        >
+          <span
+            className="text-[14px] font-medium font-semibold"
+            style={{ color: 'var(--secondary-foreground)' }}
+          >
+            Vision Model
+          </span>
+          <span
+            className="text-[14px] font-normal"
+            style={{ color: 'var(--secondary-foreground)' }}
+          >
+            Gemini Flash Latest
           </span>
         </div>
       </motion.div>
