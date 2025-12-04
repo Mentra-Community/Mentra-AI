@@ -32,7 +32,7 @@ function BottomHeader({ isDarkMode, isVisible }: BottomHeaderProps): React.JSX.E
             style={{ color: 'var(--secondary-foreground)' }}
           >
             <img src={WhiteMiraLogo} alt="Mira Logo" className="w-[32px] h-[32px]" />
-            <div className='text-[16px] font-semibold mt-[4px] text-white'>start with "Hey Mira"</div>
+            <div className='text-[16px] font-semibold mt-[4px] text-white'>start with "Hey Mentra"</div>
           </h2>
         </motion.div>
       )}
