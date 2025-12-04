@@ -324,7 +324,7 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
                     />
                   </motion.div>
                                     <h1 className="text-[20px] sm:text-4xl md:text-5xl lg:text-6xl font-semibold flex gap-[4px]  justify-center">
-                    {['Say', '"Hey', 'Mira"'].map((word, index) => (
+                    {['Say', '"Hey', 'Mentra"'].map((word, index) => (
                       <motion.span
                         key={index}
                         initial={{ opacity: 0, filter: 'blur(10px)' }}
