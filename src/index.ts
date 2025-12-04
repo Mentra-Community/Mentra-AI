@@ -125,6 +125,7 @@ class TranscriptionManager {
   private activePhotos: Map<string, { promise: Promise<PhotoData>, photoData: PhotoData | null, lastPhotoTime: number, requestTime?: number }> = new Map();
   private logger: AppSession['logger'];
   private currentQueryMessageId?: string; // Track the current query message ID for updates
+  private isRequestingPhoto: boolean = false; // Flag to prevent multiple simultaneous photo requests
 
     /**
      * Tracks the last observed head position and a time window during which
@@ -192,19 +193,17 @@ class TranscriptionManager {
         }
       }
 
-    // if we have a photo and it's older than 5 seconds, delete it
-    if (this.activePhotos.has(this.sessionId)) {
-      const photo = this.activePhotos.get(this.sessionId);
-      if (photo) {
-        if (photo.lastPhotoTime + 2000 < Date.now()) {
-          this.activePhotos.delete(this.sessionId);
-        }
-      }
-    }
+    // Photo strategy: ONE photo per wake word activation
+    // - Photo is requested immediately when wake word is detected
+    // - Photo is used for the entire query (vision or non-vision)
+    // - Photo is cleared after query completes (in finally block)
+    // - Next activation gets a fresh photo
 
-    if (!this.activePhotos.has(this.sessionId)) {
+    // Only request ONE photo per query - check both activePhotos and isRequestingPhoto flag
+    if (!this.activePhotos.has(this.sessionId) && !this.isRequestingPhoto) {
       // if we don't have a photo, get one
       if (this.session.capabilities?.hasCamera) {
+        this.isRequestingPhoto = true; // Set flag to prevent duplicate requests
         const photoRequestTime = Date.now();
         console.log(`📸 [${new Date().toISOString()}] Photo requested at timestamp: ${photoRequestTime}`);
         const getPhotoPromise = this.session.camera.requestPhoto({size: "small"});
@@ -217,16 +216,14 @@ class TranscriptionManager {
             photoData: photoData,
             lastPhotoTime: Date.now()
           });
-          setTimeout(() => {
-            // if we have a photo and it's older than 30 seconds, delete it
-            if (this.activePhotos.has(this.sessionId) && this.activePhotos.get(this.sessionId)?.promise == getPhotoPromise) {
-              this.activePhotos.delete(this.sessionId);
-            }
-          }, 30000); 
+          // Don't reset isRequestingPhoto here - keep it set until query is complete
+          // This prevents requesting another photo during the same query
+          // Photo will be cleared when query completes (in finally block)
         }, error => {
           console.log(`📸 [${new Date().toISOString()}] ❌ Photo request failed after ${Date.now() - photoRequestTime}ms`);
           this.logger.error(error, `[Session ${this.sessionId}]: Error getting photo:`);
           this.activePhotos.delete(this.sessionId);
+          this.isRequestingPhoto = false; // Reset flag on error so next query can try again
         });
         this.activePhotos.set(this.sessionId, {
           // promise: this.session.camera.requestPhoto(), // Keep original promise for compatibility
@@ -262,6 +259,8 @@ class TranscriptionManager {
         // Reset state - DO NOT return early without cleanup!
         this.isListeningToQuery = false;
         this.isProcessingQuery = false;
+        this.isRequestingPhoto = false;
+        this.activePhotos.delete(this.sessionId); // Clear photo cache
         this.transcriptionStartTime = 0;
         if (this.timeoutId) {
           clearTimeout(this.timeoutId);
@@ -760,6 +759,8 @@ class TranscriptionManager {
       // Reset all state properly
       this.isListeningToQuery = false;
       this.isProcessingQuery = false;
+      this.isRequestingPhoto = false;
+      this.activePhotos.delete(this.sessionId); // Clear photo cache
       this.transcriptionStartTime = 0;
       if (this.timeoutId) {
         clearTimeout(this.timeoutId);
@@ -830,8 +831,8 @@ class TranscriptionManager {
         { durationMs: 8000 }
       );
 
-      // CRITICAL: Detect vision queries and force fresh photo request
-      // Vision queries should NEVER use cached photos - always get a new one
+      // Detect vision queries to clear conversation history
+      // This ensures the AI doesn't use context from previous queries
       const visionKeywords = [
         'what am i looking at', 'what is this', 'what is that',
         'identify this', 'what do you see', 'describe what',
@@ -844,53 +845,15 @@ class TranscriptionManager {
       const isVisionQuery = visionKeywords.some(keyword => queryLower.includes(keyword));
 
       if (isVisionQuery) {
-        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📸 VISION QUERY DETECTED - Invalidating cached photo to force fresh capture`);
-        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📸 Matched vision keyword in query: "${query}"`);
-        // Delete cached photo to force a fresh one
-        this.activePhotos.delete(this.sessionId);
+        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 👁️  VISION QUERY DETECTED - Clearing conversation history`);
         // Clear conversation history for vision queries to prevent context contamination
         this.miraAgent.clearConversationHistory();
-        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 🗑️  Cleared conversation history for fresh vision query`);
-
-        // Immediately request a FRESH photo for this vision query
-        if (this.session.capabilities?.hasCamera) {
-          const freshPhotoRequestTime = Date.now();
-          console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📸 Requesting FRESH photo for vision query at timestamp: ${freshPhotoRequestTime}`);
-          const freshPhotoPromise = this.session.camera.requestPhoto({size: "small"});
-
-          freshPhotoPromise.then(photoData => {
-            const photoReceivedTime = Date.now();
-            const photoLatency = photoReceivedTime - freshPhotoRequestTime;
-            console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📸 ✅ FRESH photo received! Latency: ${photoLatency}ms`);
-            this.activePhotos.set(this.sessionId, {
-              promise: freshPhotoPromise,
-              photoData: photoData,
-              lastPhotoTime: Date.now(),
-              requestTime: freshPhotoRequestTime
-            });
-            // Auto-expire after 30 seconds
-            setTimeout(() => {
-              if (this.activePhotos.has(this.sessionId) && this.activePhotos.get(this.sessionId)?.promise === freshPhotoPromise) {
-                this.activePhotos.delete(this.sessionId);
-              }
-            }, 30000);
-          }, error => {
-            console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📸 ❌ FRESH photo request failed: ${error}`);
-            this.logger.error(error, `[Session ${this.sessionId}]: Error getting fresh photo for vision query:`);
-          });
-
-          // Store the promise immediately so getPhoto can wait for it
-          this.activePhotos.set(this.sessionId, {
-            promise: freshPhotoPromise,
-            photoData: null,
-            lastPhotoTime: Date.now(),
-            requestTime: freshPhotoRequestTime
-          });
-        }
       }
 
+      // Photo was already requested at wake word activation (line 208)
+      // Simply retrieve it here - no need for special vision query handling
       const photoStartTime = Date.now();
-      console.log(`⏱️  [+${photoStartTime - processQueryStartTime}ms] 📸 Getting photo (vision query: ${isVisionQuery})...`);
+      console.log(`⏱️  [+${photoStartTime - processQueryStartTime}ms] 📸 Getting photo from wake word activation...`);
       // Get photo without waiting (non-blocking) - returns cached photo or null
       const photo = await this.getPhoto(false);
       console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ${photo ? '✅ Photo retrieved' : '⚪ No photo available (will wait only if needed)'}`);
@@ -1066,6 +1029,12 @@ class TranscriptionManager {
 
       // Clear the current query message ID for next query
       this.currentQueryMessageId = undefined;
+
+      // Clear photo cache so next activation gets a fresh photo
+      this.activePhotos.delete(this.sessionId);
+
+      // Reset photo request flag for next query
+      this.isRequestingPhoto = false;
 
       // Reset listening state
       this.isListeningToQuery = false;
