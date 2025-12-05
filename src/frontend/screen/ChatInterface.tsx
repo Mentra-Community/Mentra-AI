@@ -30,19 +30,19 @@ interface ChatInterfaceProps {
 
 /**
  * ChatInterface component - Beautiful dark-themed chat UI
- * Shows messages between the current user and Mira assistant
+ * Shows messages between the current user and assistant
  * Messages are stored in memory and broadcast in real-time
  */
 function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.Element {
   // Fun thinking words list
   const thinkingWords = [
-    "doodling",
+    "Mentra doodling",
     "vibing",
     "cooking",
     "pondering",
     "brewing",
     "crafting",
-    "dreaming",
+    "Mentra dreaming",
     "computing",
     "processing",
     "brainstorming",
@@ -50,7 +50,15 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
     "imagining"
   ];
 
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      id: '1',
+      senderId: 'assistant',
+      recipientId: userId,
+      content: 'Hey! How can I help you today?',
+      timestamp: new Date(Date.now() - 5000)
+    }
+  ]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [thinkingWord, setThinkingWord] = useState(() =>
     thinkingWords[Math.floor(Math.random() * thinkingWords.length)]
@@ -64,7 +72,7 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [isDarkMode, setIsDarkMode] = useState(() => {
     // Load dark mode preference from localStorage
-    const saved = localStorage.getItem('mira-dark-mode');
+    const saved = localStorage.getItem('dark-mode');
     return saved ? JSON.parse(saved) : false;
   });
   const [currentPage, setCurrentPage] = useState<'chat' | 'settings'>('chat');
@@ -103,7 +111,7 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
 
   // Save dark mode preference to localStorage and apply to root element
   useEffect(() => {
-    localStorage.setItem('mira-dark-mode', JSON.stringify(isDarkMode));
+    localStorage.setItem('dark-mode', JSON.stringify(isDarkMode));
     console.log('[ChatInterface] 💾 Saved dark mode to localStorage:', isDarkMode);
 
     if (isDarkMode) {
@@ -154,13 +162,13 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
             (data.senderId === recipientId && data.recipientId === userId);
 
           if (isRelevant) {
-            // If it's a message FROM the user (not from Mira), show processing indicator
+            // If it's a message FROM the user (not from assistant), show processing indicator
             if (data.senderId === userId) {
               const randomWord = thinkingWords[Math.floor(Math.random() * thinkingWords.length)];
               setThinkingWord(randomWord);
               setIsProcessing(true);
             } else {
-              // If it's Mira's response, hide processing
+              // If it's assistant's response, hide processing
               setIsProcessing(false);
             }
 
@@ -284,7 +292,13 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
         />
 
         {/* Main Content Area */}
-        <div className="flex-1 overflow-y-auto relative">
+        <div
+          className="flex-1 overflow-y-auto relative"
+          style={{
+            scrollbarWidth: 'none',
+            msOverflowStyle: 'none',
+          }}
+        >
           {/* Gradient background at bottom - visible only when no messages */}
               <div
                 className="fixed bottom-0 left-0 right-0 pointer-events-none flex justify-center"
@@ -438,7 +452,7 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
                       animate={{ opacity: 1 }}
                       transition={{ duration: 0.3 }}
                     >
-                      {`Mira ${thinkingWord}...`.split("").map((char, index) => (
+                      {`${thinkingWord}...`.split("").map((char, index) => (
                         <motion.span
                           key={index}
                           initial={{ opacity: 0 }}
