@@ -284,8 +284,13 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
         />
 
         {/* Main Content Area */}
-        <div className="flex-1 overflow-y-auto relative">
-          {/* Gradient background at bottom - visible only when no messages */}
+        <div
+          className="flex-1 overflow-y-auto relative"
+          style={{
+            scrollbarWidth: 'none',
+            msOverflowStyle: 'none',
+          }}
+        >          {/* Gradient background at bottom - visible only when no messages */}
               <div
                 className="fixed bottom-0 left-0 right-0 pointer-events-none flex justify-center"
                 style={{ height: '1000px', transform: 'translateY(660px)' }}
@@ -438,7 +443,7 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
                       animate={{ opacity: 1 }}
                       transition={{ duration: 0.3 }}
                     >
-                      {`Mira ${thinkingWord}...`.split("").map((char, index) => (
+                      {`${thinkingWord}...`.split("").map((char, index) => (
                         <motion.span
                           key={index}
                           initial={{ opacity: 0 }}
