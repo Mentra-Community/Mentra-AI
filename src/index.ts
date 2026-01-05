@@ -103,7 +103,7 @@ const explicitWakeWords = [
   // real word confusables
   "hey mentor", "hey mental", "hey metric", "hey mattress", "hey metro",
   "hey matter", "hey metal", "hey medra", "hey menorah", "hey minerva",
-  "hey mantra", "hey mantle",
+  "hey mantra", "hey mantle", "hey mehta", "hey meta",
 
   // vowel swaps
   "hi mentra", "hi mantra", "hi manta", "hi metro", "hi myntra", "hi mintra",
@@ -117,7 +117,17 @@ const explicitWakeWords = [
   // esl / kid variants
   "hey menta", "hey menthwa", "hey mentula", "hey mentwa", "hey mengra",
   "hey mengla", "hey mencha", "hey man-cha", "hey metchra", "hey metra",
-  "hey maytra", "hey meetra"
+  "hey maytra", "hey meetra",
+
+  // additional name variants
+  "hey myntra", "he myntra", "hi myntra", "hay myntra",
+  "hey mitch", "he mitch", "hi mitch", "hay mitch",
+  "hey mitchell", "he mitchell", "hi mitchell", "hay mitchell",
+  "hey mitchel", "he mitchel", "hey mitchall", "hey michell",
+
+  //weird ones here: 
+  "a mantra", "a mentra", "a mentora", "a mentara", "it mentioned"
+
 ];
 
 // Cancellation phrases that cancel Mira activation
