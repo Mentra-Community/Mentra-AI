@@ -249,6 +249,7 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
         onBack={() => setCurrentPage('chat')}
         isDarkMode={isDarkMode}
         onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
+        userId={userId}
       />
     );
   }
