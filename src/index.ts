@@ -187,6 +187,7 @@ class TranscriptionManager {
   private logger: AppSession['logger'];
   private currentQueryMessageId?: string; // Track the current query message ID for updates
   private isRequestingPhoto: boolean = false; // Flag to prevent multiple simultaneous photo requests
+  private broadcastTranscription: (text: string, isFinal: boolean) => void = () => {}; // Callback to broadcast transcription
 
     /**
      * Tracks the last observed head position and a time window during which
@@ -200,13 +201,22 @@ class TranscriptionManager {
 
   private chatManager?: ChatManager;
 
-  constructor(session: AppSession, sessionId: string, userId: string, miraAgent: MiraAgent, serverUrl: string, chatManager?: ChatManager) {
+  constructor(
+    session: AppSession,
+    sessionId: string,
+    userId: string,
+    miraAgent: MiraAgent,
+    serverUrl: string,
+    chatManager?: ChatManager,
+    broadcastTranscription?: (text: string, isFinal: boolean) => void
+  ) {
     this.session = session;
     this.sessionId = sessionId;
     this.userId = userId;
     this.miraAgent = miraAgent;
     this.serverUrl = serverUrl;
     this.chatManager = chatManager;
+    this.broadcastTranscription = broadcastTranscription || (() => {}); // Default to no-op if not provided
     // Use same settings as LiveCaptions for now
     this.transcriptProcessor = new TranscriptProcessor(30, 3, 3, false);
     this.logger = session.logger.child({ service: 'Mira.TranscriptionManager' });
@@ -222,7 +232,10 @@ class TranscriptionManager {
 
     const transcriptionReceiveTime = Date.now();
     console.log(`🎤 [${new Date().toISOString()}] Transcription received: "${transcriptionData.text}" (isFinal: ${transcriptionData.isFinal})`);
-    
+
+    // Broadcast transcription to SSE clients
+    this.broadcastTranscription(transcriptionData.text, !!transcriptionData.isFinal);
+
     if (this.isProcessingQuery) {
       this.logger.info(`[Session ${this.sessionId}]: Query already in progress. Ignoring transcription.`);
       return;
@@ -1256,6 +1269,7 @@ class MiraServer extends AppServer {
   private agentPerSession = new Map<string, MiraAgent>();
   private agentPerUser = new Map<string, MiraAgent>(); // Persistent agents per user
   private chatManager: ChatManager;
+  private transcriptionSSEConnections = new Map<string, Set<any>>(); // userId -> SSE connections
 
   constructor(options: any) {
     super(options);
@@ -1403,6 +1417,53 @@ class MiraServer extends AppServer {
       });
     });
 
+    // SSE endpoint for live transcription streaming
+    app.get('/api/transcription/stream', (req, res) => {
+      const userId = req.query.userId as string;
+
+      if (!userId) {
+        res.status(400).json({ error: 'userId is required' });
+        return;
+      }
+
+      console.log(`[TRANSCRIPTION SSE] 📡 Setting up transcription stream for user ${userId}`);
+
+      // Set SSE headers
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+      });
+
+      // Register this SSE connection
+      if (!this.transcriptionSSEConnections.has(userId)) {
+        this.transcriptionSSEConnections.set(userId, new Set());
+      }
+      this.transcriptionSSEConnections.get(userId)!.add(res);
+
+      // Send initial connection message
+      res.write(`data: ${JSON.stringify({ type: 'connected', message: 'Transcription stream connected' })}\n\n`);
+
+      // Keepalive ping every 30 seconds
+      const keepAlive = setInterval(() => {
+        res.write(`: keepalive\n\n`);
+      }, 30000);
+
+      // Cleanup on disconnect
+      req.on('close', () => {
+        clearInterval(keepAlive);
+        const connections = this.transcriptionSSEConnections.get(userId);
+        if (connections) {
+          connections.delete(res);
+          if (connections.size === 0) {
+            this.transcriptionSSEConnections.delete(userId);
+          }
+        }
+        console.log(`[TRANSCRIPTION SSE] 🔌 Connection closed for user ${userId}`);
+      });
+    });
+
     logger.info('✅ Chat API routes configured with SSE support');
   }
 
@@ -1438,9 +1499,31 @@ class MiraServer extends AppServer {
 
     this.agentPerSession.set(sessionId, agent);
 
+    // Create broadcast function for transcription SSE
+    const broadcastTranscription = (text: string, isFinal: boolean) => {
+      const connections = this.transcriptionSSEConnections.get(userId);
+      if (connections && connections.size > 0) {
+        const data = JSON.stringify({
+          type: 'transcription',
+          text,
+          isFinal,
+          timestamp: new Date().toISOString()
+        });
+        const sseData = `data: ${data}\n\n`;
+
+        connections.forEach((res: any) => {
+          try {
+            res.write(sseData);
+          } catch (error) {
+            logger.error(error, `[TRANSCRIPTION SSE] Error broadcasting to ${userId}:`);
+          }
+        });
+      }
+    };
+
     // Create a transcription manager for this session — this is what essentially connects the user's session input to the backend.
     const transcriptionManager = new TranscriptionManager(
-      session, sessionId, userId, agent, cleanServerUrl, this.chatManager
+      session, sessionId, userId, agent, cleanServerUrl, this.chatManager, broadcastTranscription
     );
     this.transcriptionManagers.set(sessionId, transcriptionManager);
 

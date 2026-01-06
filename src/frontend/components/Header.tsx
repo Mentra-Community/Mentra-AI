@@ -13,7 +13,7 @@ interface HeaderProps {
  */
 function Header({ isDarkMode, onToggleDarkMode, onSettingsClick }: HeaderProps): React.JSX.Element {
   return (
-    <div className="w-full h-[72px] flex items-center justify-between px-[24px] relative z-50">
+    <div className="w-full h-[72px] flex items-center justify-between px-[24px] relative z-10">
       {/* Settings Button - Left */}
       <button
         onClick={onSettingsClick}

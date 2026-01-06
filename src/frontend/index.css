@@ -107,10 +107,45 @@
   --font-sans: 'Red Hat Display', system-ui, sans-serif;
 }
 
-/* Default Font */
+/* Default Font and overscroll prevention */
 * {
   font-family: 'Red Hat Display', system-ui, -apple-system, sans-serif;
   letter-spacing: 0;
+  overscroll-behavior: none !important;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Disable overscroll bounce/stretch effect */
+html {
+  overscroll-behavior: none !important;
+  touch-action: manipulation;
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+}
+
+body {
+  overscroll-behavior: none !important;
+  touch-action: manipulation;
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  position: fixed;
+  overflow: hidden;
+}
+
+/* Allow scrolling within app container */
+#root {
+  overflow-y: auto;
+  overflow-x: hidden;
+  height: 100vh;
+  height: 100dvh; /* Dynamic viewport height for mobile */
+  width: 100vw;
+  overscroll-behavior: none !important;
+  touch-action: pan-y;
+  position: relative;
 }
 
 /* Light Mode (Default) */

@@ -8,7 +8,7 @@ build:
   dockerfile: ./Dockerfile
 
 services:
-  - name: mira
+  - name: mentra-ai-dev
     type: web
     run: bun run start
     port: 80
