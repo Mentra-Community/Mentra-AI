@@ -2,21 +2,21 @@
 
 import { Agent } from "./AgentInterface";
 import { AgentExecutor, createReactAgent } from "langchain/agents";
-import { SearchToolForAgents } from "./tools/SearchToolForAgents";
+import { SearchToolForAgents } from "../tools/SearchToolForAgents";
 import { PromptTemplate } from "@langchain/core/prompts";
 import { LLMProvider } from "../utils";
 import { wrapText } from "../utils";
 import { AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
 import { Tool, StructuredTool } from "langchain/tools";
-import { TpaCommandsTool, TpaListAppsTool } from "./tools/TpaCommandsTool";
-import { SmartAppControlTool } from "./tools/SmartAppControlTool";
+import { TpaCommandsTool, TpaListAppsTool } from "../tools/TpaCommandsTool";
+import { SmartAppControlTool } from "../tools/SmartAppControlTool";
 import { AppManagementAgent } from "./AppManagementAgent";
 
-import { ThinkingTool } from "./tools/ThinkingTool";
+import { ThinkingTool } from "../tools/ThinkingTool";
 import { Calculator } from "@langchain/community/tools/calculator";
 import { AppServer, PhotoData, GIVE_APP_CONTROL_OF_TOOL_RESPONSE } from "@mentra/sdk";
-import { analyzeImage } from "../utils/img-processor";
+import { analyzeImage } from "../utils/img-processor.util";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";

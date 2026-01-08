@@ -5,7 +5,7 @@
  * Run with: bun src/test/smart-glasses-search-test.ts
  */
 
-import { smartGlassesSearch, ultraFastSearch } from '../utils/serpapi';
+import { smartGlassesSearch, ultraFastSearch } from '../server/utils/serpapi';
 
 /**
  * Simple function to search and profile timing

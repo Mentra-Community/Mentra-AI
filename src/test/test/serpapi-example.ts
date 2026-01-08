@@ -10,7 +10,7 @@ import {
   searchImages,
   quickSearch,
   getRelatedSearches,
-} from '../utils/serpapi';
+} from '../server/utils/serpapi';
 
 async function exampleBasicSearch() {
   console.log('\n=== Basic Search Example ===');

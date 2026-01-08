@@ -1,4 +1,4 @@
-import { findChineseWordBoundary } from '../ChineseUtils';
+import { findChineseWordBoundary } from '../utils/chinese.util';
 
 export class TranscriptProcessor {
   private maxCharsPerLine: number;

@@ -4,7 +4,7 @@ import { Agent } from "./AgentInterface";
 import { LLMProvider } from "../utils";
 import { AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
 import { Tool, StructuredTool } from "langchain/tools";
-import { TpaCommandsTool, TpaListAppsTool } from "./tools/TpaCommandsTool";
+import { TpaCommandsTool, TpaListAppsTool } from "../tools/TpaCommandsTool";
 
 interface AppActionResult {
   success: boolean;

@@ -8,13 +8,15 @@ import {
 } from '@mentra/sdk';
 import { MiraAgent } from './agents';
 import { wrapText, TranscriptProcessor } from './utils';
-import { getAllToolsForUser } from './agents/tools/TpaTool';
+import { getAllToolsForUser } from './tools/TpaTool';
 import { log } from 'console';
 // import { Anim } from './utils/anim';
-import { analyzeImage } from './utils/img-processor';
-import { ChatManager } from './chat/ChatManager';
+import { analyzeImage } from './utils/img-processor.util';
+import { ChatManager } from './manager/chat.manager';
 import express from 'express';
-import { reverseGeocode, getTimezone } from './utils/GoogleMaps';
+import { reverseGeocode, getTimezone } from './utils/map.util';
+import { ChatAPI, TranscriptionAPI } from './api';
+import { createChatRoutes, createTranscriptionRoutes } from './routes';
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 80;
 const PACKAGE_NAME = process.env.PACKAGE_NAME;
@@ -1305,164 +1307,18 @@ class MiraServer extends AppServer {
   }
 
   /**
-   * Set up Express routes and WebSocket for chat
+   * Set up Express routes for chat and transcription APIs
    */
   private setupChatRoutes(): void {
-    const app = this.getExpressApp();
+    const app = this.getExpressApp() as any;
 
-    // Add body parser middleware for chat routes
-    const jsonParser = express.json();
+    // Create API controllers
+    const chatAPI = new ChatAPI(this.chatManager);
+    const transcriptionAPI = new TranscriptionAPI(this.transcriptionSSEConnections);
 
-    // API endpoint to send a message
-    app.post('/api/chat/message', jsonParser, async (req, res) => {
-      try {
-        const { userId, message } = req.body;
-
-        if (!userId || !message) {
-          res.status(400).json({ error: 'userId and message are required' });
-          return;
-        }
-
-        // Process message asynchronously
-        this.chatManager.processMessage(userId, message).catch((error: Error) => {
-          logger.error(error, 'Error processing chat message:');
-        });
-
-        res.json({ success: true });
-      } catch (error) {
-        logger.error(error as Error, 'Error in /api/chat/message:');
-        res.status(500).json({ error: 'Internal server error' });
-      }
-    });
-
-    // API endpoint to get chat history
-    app.get('/api/chat/history', (req, res) => {
-      try {
-        const userId = req.query.userId as string;
-
-        if (!userId) {
-          res.status(400).json({ error: 'userId is required' });
-          return;
-        }
-
-        const messages = this.chatManager.getChatHistory(userId);
-        console.log("GETTING historyL")
-        res.json({ messages });
-      } catch (error) {
-        logger.error(error as Error, 'Error in /api/chat/history:');
-        res.status(500).json({ error: 'Internal server error' });
-      }
-    });
-
-    // API endpoint to clear chat history (for explicit logout/cleanup)
-    app.delete('/api/chat/clear', (req, res) => {
-      try {
-        const userId = req.query.userId as string;
-
-        if (!userId) {
-          res.status(400).json({ error: 'userId is required' });
-          return;
-        }
-
-        logger.info(`🗑️ Clearing chat data for user ${userId}`);
-        this.chatManager.cleanupUserOnDisconnect(userId);
-
-        res.json({ success: true, message: 'Chat history cleared' });
-      } catch (error) {
-        logger.error(error as Error, 'Error in /api/chat/clear:');
-        res.status(500).json({ error: 'Internal server error' });
-      }
-    });
-
-    // Server-Sent Events endpoint for real-time updates
-    app.get('/api/chat/stream', (req, res) => {
-      const userId = req.query.userId as string;
-
-      if (!userId) {
-        res.status(400).json({ error: 'userId is required' });
-        return;
-      }
-
-      console.log(`[SSE] 📡 Setting up event stream for user ${userId}`);
-
-      // Set SSE headers
-      res.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-        'Access-Control-Allow-Origin': '*',
-      });
-
-      // Register this SSE connection with ChatManager
-      this.chatManager.registerSSE(userId, res);
-
-      // Send initial history
-      const history = this.chatManager.getChatHistory(userId);
-      res.write(`data: ${JSON.stringify({ type: 'history', messages: history })}\n\n`);
-
-      // Keepalive ping every 30 seconds
-      const keepAlive = setInterval(() => {
-        res.write(`: keepalive\n\n`);
-      }, 30000);
-
-      // Cleanup on disconnect
-      req.on('close', () => {
-        clearInterval(keepAlive);
-        this.chatManager.unregisterSSE(userId, res);
-
-        // NOTE: Chat history cleanup happens in onStop() when session ends
-        // This allows users to close/reopen webview without losing messages
-
-        console.log(`[SSE] 🔌 Connection closed for user ${userId}`);
-      });
-    });
-
-    // SSE endpoint for live transcription streaming
-    app.get('/api/transcription/stream', (req, res) => {
-      const userId = req.query.userId as string;
-
-      if (!userId) {
-        res.status(400).json({ error: 'userId is required' });
-        return;
-      }
-
-      console.log(`[TRANSCRIPTION SSE] 📡 Setting up transcription stream for user ${userId}`);
-
-      // Set SSE headers
-      res.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-        'Access-Control-Allow-Origin': '*',
-      });
-
-      // Register this SSE connection
-      if (!this.transcriptionSSEConnections.has(userId)) {
-        this.transcriptionSSEConnections.set(userId, new Set());
-      }
-      this.transcriptionSSEConnections.get(userId)!.add(res);
-
-      // Send initial connection message
-      res.write(`data: ${JSON.stringify({ type: 'connected', message: 'Transcription stream connected' })}\n\n`);
-
-      // Keepalive ping every 30 seconds
-      const keepAlive = setInterval(() => {
-        res.write(`: keepalive\n\n`);
-      }, 30000);
-
-      // Cleanup on disconnect
-      req.on('close', () => {
-        clearInterval(keepAlive);
-        const connections = this.transcriptionSSEConnections.get(userId);
-        if (connections) {
-          connections.delete(res);
-          if (connections.size === 0) {
-            this.transcriptionSSEConnections.delete(userId);
-          }
-        }
-        console.log(`[TRANSCRIPTION SSE] 🔌 Connection closed for user ${userId}`);
-      });
-    });
+    // Mount routes
+    app.use('/api/chat', createChatRoutes(chatAPI));
+    app.use('/api/transcription', createTranscriptionRoutes(transcriptionAPI));
 
     logger.info('✅ Chat API routes configured with SSE support');
   }

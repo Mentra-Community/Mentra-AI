@@ -5,7 +5,7 @@
  * Run with: bun src/test/google-maps-test.ts
  */
 
-import { reverseGeocode } from '../utils/GoogleMaps';
+import { reverseGeocode } from '../server/utils/GoogleMaps';
 
 // Test coordinates
 const TEST_LOCATIONS = [

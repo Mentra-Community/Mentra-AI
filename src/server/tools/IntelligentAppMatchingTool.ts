@@ -1,7 +1,7 @@
 import { StructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 import { TpaListAppsTool } from './TpaCommandsTool';
-import { LLMProvider } from '../../utils';
+import { LLMProvider } from '../utils';
 import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
 
 const IntelligentAppMatchingInputSchema = z.object({

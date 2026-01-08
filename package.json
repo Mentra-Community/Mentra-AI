@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently \"bun run dev:backend\" \"bun run dev:frontend\"",
-    "dev:backend": "bun --watch src/index.ts",
+    "dev:backend": "bun --watch src/server/index.ts",
     "dev:frontend": "vite",
     "build:frontend": "vite build",
     "build:frontend:prod": "bun install --production && vite build",
