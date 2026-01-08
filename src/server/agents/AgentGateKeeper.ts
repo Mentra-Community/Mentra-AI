@@ -2,6 +2,7 @@ import { Agent } from "./AgentInterface";
 import { PromptTemplate } from "@langchain/core/prompts";
 import { JsonOutputFunctionsParser } from "langchain/output_parsers";
 import { LLMProvider } from "../utils";
+import { AGENT_GATEKEEPER_PROMPT } from "../constant/prompts";
 
 /**
  * Interface for the aggregated response from the AgentGatekeeper.
@@ -11,25 +12,6 @@ interface GatekeeperResponse {
   selectedAgents: string[];
   output: any[];
 }
-
-const agentGatekeeperPrompt = `# Objective
-You are an agent router. I will provide:
-1. The user's context.
-2. A list of agents (with ID, name, and description).
-
-You must decide which agents are best suited to handle the user's request.
-Output a JSON array of the agent IDs that should be invoked, in order of relevance.
-If no agent is relevant, return an empty array.
-
-Do not provide any additional text or formatting, just valid JSON.
-
-User Context:
-{user_context}
-
-Agents:
-{agent_list}
-
-Return ONLY the IDs in a JSON array, e.g. ["agent1", "agent2"] or []`;
 
 /**
  * The AgentGatekeeper is responsible for:
@@ -47,7 +29,7 @@ export class AgentGatekeeper {
    */
   constructor(agents: Agent[]) {
     this.agents = agents;
-    this.agentPrompt = agentGatekeeperPrompt;
+    this.agentPrompt = AGENT_GATEKEEPER_PROMPT;
   }
 
   /**

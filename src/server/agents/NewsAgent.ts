@@ -3,6 +3,7 @@ import axios from 'axios';
 import { PromptTemplate } from "@langchain/core/prompts";
 import { JsonOutputFunctionsParser } from 'langchain/output_parsers';
 import { LLMProvider } from '../utils'; // Utility to easily swap LLMs
+import { NEWS_AGENT_PROMPT } from '../constant/prompts';
 
 /** 
  * Minimal interface for a news article as returned by NewsAPI.
@@ -20,30 +21,6 @@ interface NewsSummaries {
   news_summaries: string[];
 }
 
-const agentPromptBlueprint = `You are an AI assistant that provides a one-liner summary for each news article.
-
-You are given a context of news articles (title, description, publishedAt) below.
-
-Your output must be valid JSON with a single key:
-"news_summaries" — an array of one-line summaries, each corresponding to one news article.
-
-News Articles Context:
-{news_articles}
-
-Requirements:
-- Each summary must be under 40 characters.
-- Each summary should capture the key point of the corresponding breaking news.
-- Output exactly one summary per news article.
-- Exclude any ads or promotions.
-
-Output Example:
-{{
-  "news_summaries": [
-    "Earthquake in SF.",
-    "Market dips amid fears."
-  ]
-}}`;
-
 /**
  * The NewsSummarizeAgent fetches recent news articles and generates
  * short bullet summaries for each, returning them as a list of strings.
@@ -52,7 +29,7 @@ export class NewsAgent implements Agent {
   public agentId = 'news_summarize';
   public agentName = 'News Summarizer';
   public agentDescription = 'Fetches and summarizes recent news articles';
-  public agentPrompt = agentPromptBlueprint;
+  public agentPrompt = NEWS_AGENT_PROMPT;
   public agentTools = [];
 
   /**

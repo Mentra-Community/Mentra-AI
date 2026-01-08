@@ -2,6 +2,7 @@ import { Agent } from "./AgentInterface";
 import { PromptTemplate } from "@langchain/core/prompts";
 import { HumanMessage } from "@langchain/core/messages";
 import { LLMProvider } from "../utils";
+import { NOTIFICATION_FILTER_PROMPT } from "../constant/prompts";
 
 // Define interfaces for notifications and response
 export interface NotificationRank {
@@ -18,53 +19,12 @@ export interface NotificationFilterResponse {
   notification_ranking: NotificationRank[];
 }
 
-const agentPromptBlueprint = `You are an assistant on smart glasses that filters the notifications the user receives on their phone by importance and provides a concise summary for the HUD display.
-
-Your output **must** be a valid JSON object with one key:
-"notification_ranking" — an array of notifications, ordered from most important (rank=1) to least important (rank=10).
-
-For each notification in the output array:
-  1. Include the notification "uuid".
-  2. Include a short "summary" that captures the most important points from the title, body, and (optionally) the appName if it provides relevant context (e.g., times, tasks, or key details). The summary must be under 50 characters.
-  3. If the notification title contains a name, the "summary" must include the summarized name of the sender (e.g., only their first name) or the relevant individual mentioned.
-  4. Include a "rank" integer between 1 and 10 (where 1 = highest importance, 10 = lowest).
-
-Criteria of Importance:
-  - Urgent tasks, deadlines, and time-sensitive events are ranked higher.
-  - Notifications that mention deadlines, reminders, or critical alerts should be given the highest priority.
-  - Personal messages from known contacts (indicated by a name in the title) should be prioritized over generic system notifications.
-  - Exclude any system notifications that aren't related to low phone battery.
-  - Ensure the output list does not include duplicate or overly similar notifications.
-  - Prioritize notifications that are more recent over older notifications.
-
-Sorting:
-  - The output array must be sorted so that rank=1 is the first item, rank=2 is the second, and so on.
-
-Example Output:
-{{
-  "notification_ranking": [
-    {{
-      "uuid": "123-xyz",
-      "summary": "Submit proposal by midnight",
-      "rank": 1
-    }},
-    {{
-      "uuid": "456-abc",
-      "summary": "Alex: party on Sunday?",
-      "rank": 2
-    }}
-  ]
-}}
-
-Input (JSON):
-{notifications}`;
-
 export class NotificationFilterAgent implements Agent {
   public agentId = "notification_filter";
   public agentName = "NotificationFilterAgent";
   public agentDescription =
     "Filters notifications by importance and provides concise summaries for display on smart glasses.";
-  public agentPrompt = agentPromptBlueprint;
+  public agentPrompt = NOTIFICATION_FILTER_PROMPT;
   // This agent doesn't use additional tools.
   public agentTools: any[] = [];
 

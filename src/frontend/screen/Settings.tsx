@@ -4,6 +4,7 @@ import Header from '../components/Header';
 import Toast from '../components/Toast';
 import { useToast } from '../components/useToast';
 import { useHandGesture } from '../tools/handGestures';
+import SettingItem from '../ui/setting-item';
 
 interface TranscriptionEntry {
   id: string;
@@ -227,6 +228,9 @@ function Settings({ onBack, isDarkMode, onToggleDarkMode, userId }: SettingsProp
             Gemini Flash Latest
           </span>
         </div>
+
+          <SettingItem isFirstItem={false} isLastItem={false} settingItemName="Gemini Flash Latest"/>
+
 
         {/* Dev Mode Badge (shown when enabled) */}
         {devModeEnabled && (
