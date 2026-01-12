@@ -27,6 +27,9 @@ import {
   MAX_CONVERSATION_HISTORY,
   MAX_CONVERSATION_AGE_MS
 } from "../constant/prompts";
+import { UserSettings } from "../schemas";
+import { buildSystemPromptWithPersonality } from "../utils/prompt.util";
+import { PersonalityType } from "../constant/personality";
 
 interface QuestionAnswer {
     insight: string;
@@ -46,6 +49,8 @@ export class MiraAgent implements Agent {
   public agentPrompt = MIRA_SYSTEM_PROMPT;
   public agentTools:(Tool | StructuredTool)[];
   private appManagementAgent: AppManagementAgent;
+  private userId: string;
+  private personality: PersonalityType = 'default';
 
   public messages: BaseMessage[] = [];
   private conversationHistory: ConversationTurn[] = [];
@@ -83,6 +88,8 @@ export class MiraAgent implements Agent {
   };
 
   constructor(cloudUrl: string, userId: string) {
+    this.userId = userId;
+
     // Initialize the specialized app management agent
     this.appManagementAgent = new AppManagementAgent(cloudUrl, userId);
 
@@ -99,6 +106,9 @@ export class MiraAgent implements Agent {
 
     // Initialize with system timezone as fallback
     this.initializeSystemTimezone();
+
+    // Load user personality asynchronously
+    this.loadUserPersonality();
   }
 
   /**
@@ -139,6 +149,32 @@ export class MiraAgent implements Agent {
     } catch (error) {
       console.warn('[MiraAgent] Failed to initialize system timezone:', error);
       // Keep default "Unknown" values
+    }
+  }
+
+  /**
+   * Load user personality from database and update system prompt
+   * This runs asynchronously during initialization
+   */
+  private async loadUserPersonality(): Promise<void> {
+    try {
+      const settings = await UserSettings.findOne({ userId: this.userId });
+      if (settings) {
+        this.personality = settings.personality;
+        this.agentPrompt = buildSystemPromptWithPersonality(this.personality);
+        console.log(`[MiraAgent] ✅ Loaded personality for user ${this.userId}: ${this.personality}`);
+        console.log(`[MiraAgent] 📝 System prompt with personality (first 500 chars):\n${this.agentPrompt.substring(0, 500)}...`);
+      } else {
+        // Use default personality if no settings found
+        this.agentPrompt = buildSystemPromptWithPersonality('default');
+        console.log(`[MiraAgent] ℹ️  No settings found for user ${this.userId}, using default personality`);
+        console.log(`[MiraAgent] 📝 System prompt with default personality (first 500 chars):\n${this.agentPrompt.substring(0, 500)}...`);
+      }
+    } catch (error) {
+      console.error('[MiraAgent] ❌ Failed to load personality:', error);
+      // Fall back to default prompt if loading fails
+      this.agentPrompt = buildSystemPromptWithPersonality('default');
+      console.log(`[MiraAgent] 📝 Fallback system prompt (first 500 chars):\n${this.agentPrompt.substring(0, 500)}...`);
     }
   }
 
@@ -521,7 +557,7 @@ Answer with ONLY "YES" if it's a follow-up question that needs context from the 
 
     const conversationHistoryText = this.formatConversationHistory();
 
-    const systemPrompt = MIRA_SYSTEM_PROMPT
+    const systemPrompt = this.agentPrompt
       .replace("{response_instructions}", config.instructions)
       .replace("{tool_names}", toolNames.join("\n"))
       .replace("{location_context}", locationInfo)
@@ -662,6 +698,11 @@ Answer with ONLY "YES" if it's a follow-up question that needs context from the 
     console.log(`${"=".repeat(60)}\n`);
 
     try {
+      // STEP 0: Reload personality from database to get latest settings
+      console.log(`⏱️  [+${Date.now() - startTime}ms] 🔄 Reloading personality from database...`);
+      await this.loadUserPersonality();
+      console.log(`⏱️  [+${Date.now() - startTime}ms] ✅ Personality reloaded: ${this.personality}`);
+
       // Extract required fields from the userContext.
       const transcriptHistory = userContext.transcript_history || "";
       const insightHistory = userContext.insight_history || "";
