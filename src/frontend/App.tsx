@@ -1,6 +1,6 @@
 import React from 'react';
 import { useMentraAuth } from '@mentra/react';
-import ChatInterface from './screen/ChatInterface';
+import ChatInterface from './pages/ChatInterface';
 import AnimatedLogo from './components/AnimeLogo';
 
 /**

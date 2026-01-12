@@ -5,12 +5,47 @@ import Toast from '../components/Toast';
 import { useToast } from '../components/useToast';
 import { useHandGesture } from '../tools/handGestures';
 import SettingItem from '../ui/setting-item';
+import PersonalitySetting from './personality.setting';
+import ToggleSwitch from '../ui/toggle-switch';
+import { fetchUserSettings, updateTheme } from '../api/settings.api';
 
 interface TranscriptionEntry {
   id: string;
   text: string;
   timestamp: string;
   isFinal: boolean;
+}
+
+interface SettingsProps {
+  onBack: () => void;
+  isDarkMode: boolean;
+  onToggleDarkMode: () => void;
+  userId: string;
+}
+
+interface SettingItemInfo {
+  settingName: string;
+  description?: string;
+}
+
+const settingItems: Record<string, SettingItemInfo> = {
+  textModel: {
+    settingName : 'Conversation Model',
+    description: 'GPT-4.1-mini'
+  },
+  visionModel: {
+    settingName : 'Vision Model',
+    description: 'Gemini Flash Latest'
+  },
+  Personality: {
+    settingName : 'Personality',
+    description: 'Manage AI Personality'
+  },
+  darkMode: {
+    settingName : 'Theme',
+    description: ''
+  }
+
 }
 
 // Hook to receive live transcription via SSE
@@ -79,12 +114,7 @@ const useTranscriptionStream = (userId: string) => {
   return { currentTranscription, transcriptionHistory, isConnected };
 };
 
-interface SettingsProps {
-  onBack: () => void;
-  isDarkMode: boolean;
-  onToggleDarkMode: () => void;
-  userId: string;
-}
+
 
 /**
  * Settings page component
@@ -94,12 +124,50 @@ function Settings({ onBack, isDarkMode, onToggleDarkMode, userId }: SettingsProp
   const gestureAreaRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const transcriptionScrollRef = useRef<HTMLDivElement>(null);
+  const [showPersonalitySettings, setShowPersonalitySettings] = useState(false);
   const [devModeEnabled, setDevModeEnabled] = useState(() => {
     // Load dev mode state from localStorage
     const saved = localStorage.getItem('mira-dev-mode');
     return saved ? JSON.parse(saved) : false;
   });
   const { toastState, showToast, hideToast } = useToast();
+
+  // Fetch user settings from API on mount
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const settings = await fetchUserSettings(userId);
+        console.log('✅ Loaded user settings:', settings);
+        // Settings are loaded, you can use them if needed
+      } catch (error) {
+        console.error('Failed to load settings:', error);
+        showToast('Failed to load settings', 'error');
+      }
+    };
+
+    if (userId) {
+      loadSettings();
+    }
+  }, [userId]);
+
+  // Handle theme toggle and sync with backend
+  const handleThemeToggle = async () => {
+    const newTheme = isDarkMode ? 'light' : 'dark';
+
+    // Optimistically update UI
+    onToggleDarkMode();
+
+    // Sync with backend
+    try {
+      await updateTheme(userId, newTheme);
+      console.log('✅ Theme synced to backend:', newTheme);
+    } catch (error) {
+      console.error('Failed to update theme:', error);
+      showToast('Failed to save theme preference', 'error');
+      // Revert on failure
+      onToggleDarkMode();
+    }
+  };
 
   // Connect to transcription SSE stream
   const { currentTranscription, transcriptionHistory, isConnected } = useTranscriptionStream(userId);
@@ -161,6 +229,32 @@ function Settings({ onBack, isDarkMode, onToggleDarkMode, userId }: SettingsProp
     };
   }, []);
 
+  // If personality settings is open, show that page
+  if (showPersonalitySettings) {
+    return (
+      <div
+        className={`h-screen flex flex-col ${isDarkMode ? 'dark' : ''}`}
+        style={{
+          backgroundColor: 'var(--background)',
+          overscrollBehavior: 'none',
+          touchAction: 'pan-y'
+        }}
+      >
+        {/* Header */}
+        <Header
+          isDarkMode={isDarkMode}
+          onToggleDarkMode={onToggleDarkMode}
+          onSettingsClick={() => setShowPersonalitySettings(false)}
+        />
+
+        {/* Personality Settings Page */}
+        <div className="flex-1 overflow-y-auto">
+          <PersonalitySetting userId={userId} />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       ref={gestureAreaRef}
@@ -191,68 +285,60 @@ function Settings({ onBack, isDarkMode, onToggleDarkMode, userId }: SettingsProp
           touchAction: 'pan-y'
         }}
       >
-        {/* Conversation Model Setting Row */}
-        <div
-          className="flex items-center justify-between px-[16px] rounded-[16px] h-[56px]"
-          style={{ backgroundColor: 'var(--primary-foreground)' }}
-        >
-          <span
-            className="text-[14px] font-medium font-semibold"
-            style={{ color: 'var(--secondary-foreground)' }}
-          >
-            Conversation Model
-          </span>
-          <span
-            className="text-[14px] font-normal"
-            style={{ color: 'var(--secondary-foreground)' }}
-          >
-            GPT-4.1-mini
-          </span>
-        </div>
 
-        {/* Vision Model Setting Row */}
-        <div
-          className="flex items-center justify-between px-[16px] rounded-[16px] h-[56px]"
-          style={{ backgroundColor: 'var(--primary-foreground)' }}
-        >
-          <span
-            className="text-[14px] font-medium font-semibold"
-            style={{ color: 'var(--secondary-foreground)' }}
-          >
-            Vision Model
-          </span>
-          <span
-            className="text-[14px] font-normal"
-            style={{ color: 'var(--secondary-foreground)' }}
-          >
-            Gemini Flash Latest
-          </span>
-        </div>
-
-          <SettingItem isFirstItem={false} isLastItem={false} settingItemName="Gemini Flash Latest"/>
+        {Object.values(settingItems).map((item, index) => (
+          <SettingItem
+            key={item.settingName}
+            isFirstItem={index === 0}
+            isLastItem={index === Object.values(settingItems).length - 1}
+            settingItemName={item.settingName}
+            description={item.description}
+            onClick={() => {
+              if (item.settingName === 'Personality') {
+                setShowPersonalitySettings(true);
+              } else if (item.settingName === 'Dark Mode') {
+                onToggleDarkMode();
+              }
+            }}
+            customContent={item.settingName === 'Theme' ? (
+              <ToggleSwitch
+                isOn={isDarkMode}
+                onToggle={handleThemeToggle}
+                label="Theme"
+              />
+            ) : undefined}
+          />
+        ))}
 
 
         {/* Dev Mode Badge (shown when enabled) */}
         {devModeEnabled && (
           <div className='flex flex-col gap-3'>
-            <div className='w-full bg-[#e5e5e56f] rounded-[20px] p-[16px] flex flex-col gap-2'>
+            <div className='w-full rounded-[20px] p-[16px] flex flex-col gap-2'
+              style={{ backgroundColor: 'var(--primary-foreground)' }}
+            >
               <div className='flex items-center justify-between'>
                 <div className='text-[14px] font-semibold'
                   style={{ color: 'var(--secondary-foreground)' }}
                 >Microphone Test</div>
-                <div className={`text-[12px] ${isConnected ? 'text-green-500' : 'text-red-500'}`}>
-                  {isConnected ? '🟢 Connected' : '🔴 Disconnected'}
+                <div className='text-[12px] font-medium'
+                  style={{ color: isConnected ? '#10B981' : '#EF4444' }}
+                >
+                  {isConnected ? '● Connected' : '● Disconnected'}
                 </div>
               </div>
               <div
                 ref={transcriptionScrollRef}
-                className='bg-white dark:bg-gray-800 rounded-[12px] p-[12px] h-[300px] overflow-y-auto'
+                className='rounded-[12px] p-[12px] h-[300px] overflow-y-auto'
                 style={{
+                  backgroundColor: 'var(--background)',
                   color: 'var(--secondary-foreground)',
                 }}
               >
                 {transcriptionHistory.length === 0 && !currentTranscription ? (
-                  <div className='text-[14px] text-gray-400 italic'>
+                  <div className='text-[14px] italic'
+                    style={{ color: 'var(--text-secondary)', opacity: 0.6 }}
+                  >
                     Waiting for transcription...
                   </div>
                 ) : (
@@ -261,12 +347,20 @@ function Settings({ onBack, isDarkMode, onToggleDarkMode, userId }: SettingsProp
                     {transcriptionHistory.map((entry) => (
                       <div
                         key={entry.id}
-                        className='bg-blue-50 dark:bg-blue-900/20 rounded-[8px] p-[5px] border border-blue-200 dark:border-blue-800'
+                        className='rounded-[8px] p-[5px] border'
+                        style={{
+                          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                          borderColor: 'rgba(59, 130, 246, 0.3)',
+                        }}
                       >
-                        <div className='text-[7px] leading-relaxed whitespace-pre-wrap'>
+                        <div className='text-[7px] leading-relaxed whitespace-pre-wrap'
+                          style={{ color: 'var(--secondary-foreground)' }}
+                        >
                           {entry.text}
                         </div>
-                        <div className='text-[5px] text-gray-500 dark:text-gray-400 '>
+                        <div className='text-[5px]'
+                          style={{ color: 'var(--text-secondary)', opacity: 0.7 }}
+                        >
                           {new Date(entry.timestamp).toLocaleTimeString()}
                         </div>
                       </div>
@@ -274,11 +368,20 @@ function Settings({ onBack, isDarkMode, onToggleDarkMode, userId }: SettingsProp
 
                     {/* Show current interim transcription */}
                     {currentTranscription && (
-                      <div className='bg-gray-100 dark:bg-gray-700/50 rounded-[8px] p-[10px] border border-dashed border-gray-300 dark:border-gray-600'>
-                        <div className='text-[10px] leading-relaxed whitespace-pre-wrap text-gray-600 dark:text-gray-300 italic'>
+                      <div className='rounded-[8px] p-[10px] border border-dashed'
+                        style={{
+                          backgroundColor: 'rgba(128, 128, 128, 0.1)',
+                          borderColor: 'rgba(128, 128, 128, 0.3)',
+                        }}
+                      >
+                        <div className='text-[10px] leading-relaxed whitespace-pre-wrap italic'
+                          style={{ color: 'var(--secondary-foreground)', opacity: 0.8 }}
+                        >
                           {currentTranscription}
                         </div>
-                        <div className='text-[10px] text-gray-400 mt-1'>
+                        <div className='text-[10px] mt-1'
+                          style={{ color: 'var(--text-secondary)', opacity: 0.6 }}
+                        >
                           (listening...)
                         </div>
                       </div>

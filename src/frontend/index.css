@@ -157,6 +157,7 @@ body {
   --muted-foreground: #737373;
   --accent: #a855f7;
   --text: #ffffff;
+  --text-secondary: #4b5563;
 
   /* Gradient colors */
   --gradient-start: #f3e8ff;
@@ -173,6 +174,7 @@ body {
   --muted-foreground: #737373;
   --accent: #c084fc;
   --text: #ffffff;
+  --text-secondary: #d1d5db;
 
 
   /* Gradient colors */

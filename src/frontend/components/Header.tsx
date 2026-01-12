@@ -23,7 +23,7 @@ function Header({ isDarkMode, onToggleDarkMode, onSettingsClick }: HeaderProps):
         <Settings className="w-[20px] h-[20px]" style={{ color: 'var(--secondary-foreground)' }} />
       </button>
 
-      {/* Dark Mode Toggle - Right */}
+      {/* Dark Mode Toggle - Right
       <button
         onClick={onToggleDarkMode}
         className="w-[40px] h-[40px] rounded-full flex items-center justify-center transition-all duration-300 hover:opacity-80 hover:scale-110"
@@ -52,7 +52,7 @@ function Header({ isDarkMode, onToggleDarkMode, onSettingsClick }: HeaderProps):
             </motion.div>
           )}
         </AnimatePresence>
-      </button>
+      </button> */}
     </div>
   );
 }

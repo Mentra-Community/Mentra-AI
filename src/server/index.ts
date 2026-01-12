@@ -7,7 +7,7 @@ import {
   AuthenticatedRequest
 } from '@mentra/sdk';
 import { MiraAgent } from './agents';
-import { wrapText, TranscriptProcessor } from './utils';
+import { wrapText, TranscriptProcessor, connectToDatabase } from './utils';
 import { getAllToolsForUser } from './tools/TpaTool';
 import { log } from 'console';
 // import { Anim } from './utils/anim';
@@ -15,8 +15,8 @@ import { analyzeImage } from './utils/img-processor.util';
 import { ChatManager } from './manager/chat.manager';
 import express from 'express';
 import { reverseGeocode, getTimezone } from './utils/map.util';
-import { ChatAPI, TranscriptionAPI } from './api';
-import { createChatRoutes, createTranscriptionRoutes } from './routes';
+import { ChatAPI, TranscriptionAPI, DatabaseAPI } from './api';
+import { createChatRoutes, createTranscriptionRoutes, createDbRoutes } from './routes';
 import { explicitWakeWords, cancellationPhrases, visionKeywords } from './constant/wakeWords';
 import { SSEManager, createTranscriptionBroadcaster } from './manager/sse.manager';
 import { TranscriptionManager, getCleanServerUrl } from './manager/transcription.manager';
@@ -62,12 +62,16 @@ class MiraServer extends AppServer {
   private agentPerUser = new Map<string, MiraAgent>(); // Persistent agents per user
   private chatManager: ChatManager;
   private transcriptionSSEManager = new SSEManager(); // Manages transcription SSE connections
+  private dbAPI: DatabaseAPI; // Database API for user settings
 
   constructor(options: any) {
     super(options);
     // Initialize ChatManager with server URL
     const serverUrl = process.env.SERVER_URL || 'http://localhost:8040';
     this.chatManager = new ChatManager(serverUrl);
+
+    // Initialize DatabaseAPI
+    this.dbAPI = new DatabaseAPI();
 
     // Set up routes after server initialization
     this.setupRoutes();
@@ -109,6 +113,7 @@ class MiraServer extends AppServer {
     // Mount routes
     app.use('/api/chat', createChatRoutes(chatAPI));
     app.use('/api/transcription', createTranscriptionRoutes(transcriptionAPI));
+    app.use('/api/db', createDbRoutes(this.dbAPI));
 
     logger.info('✅ Chat API routes configured with SSE support');
   }
@@ -119,6 +124,14 @@ class MiraServer extends AppServer {
   protected async onSession(session: AppSession, sessionId: string, userId: string): Promise<void> {
     const logger = session.logger.child({ service: 'Mira.MiraServer' });
     logger.info(`Setting up Mira service for session ${sessionId}, user ${userId}`);
+
+    // Initialize user settings with defaults if they don't exist
+    try {
+      await this.dbAPI.initializeUserSettings(userId);
+    } catch (error) {
+      logger.error(error as Error, `Failed to initialize settings for user ${userId}:`);
+      // Continue even if settings initialization fails
+    }
 
     const cleanServerUrl = getCleanServerUrl(session.getServerUrl());
 
@@ -244,13 +257,22 @@ const server = new MiraServer({
   publicDir: path.join(__dirname, './public')
 });
 
-server.start()
-  .then(() => {
+// Initialize database connection and start server
+async function startServer() {
+  try {
+    // Connect to MongoDB (optional - will skip if MONGODB_URI not set)
+    await connectToDatabase();
+
+    // Start the server
+    await server.start();
     logger.info(`${PACKAGE_NAME} server running`);
-  })
-  .catch(error => {
+  } catch (error) {
     logger.error(error, 'Failed to start server:');
-  });
+    process.exit(1);
+  }
+}
+
+startServer();
 
 
 // Log any unhandled promise rejections or uncaught exceptions to help with debugging.
