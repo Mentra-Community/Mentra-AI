@@ -7,8 +7,8 @@ import {
   AuthenticatedRequest
 } from '@mentra/sdk';
 import { MiraAgent } from './agents';
-import { wrapText, TranscriptProcessor, connectToDatabase } from './utils';
-import { getAllToolsForUser } from './tools/TpaTool';
+import { connectToDatabase } from './utils';
+import { getAllToolsForUser } from './agents/tools/TpaTool';
 import { log } from 'console';
 // import { Anim } from './utils/anim';
 import { analyzeImage } from './utils/img-processor.util';

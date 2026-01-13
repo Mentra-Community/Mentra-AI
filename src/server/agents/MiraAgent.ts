@@ -2,18 +2,18 @@
 
 import { Agent } from "./AgentInterface";
 import { AgentExecutor, createReactAgent } from "langchain/agents";
-import { SearchToolForAgents } from "../tools/SearchToolForAgents";
+import { SearchToolForAgents } from "./tools/SearchToolForAgents";
 import { PromptTemplate } from "@langchain/core/prompts";
 import { LLMProvider } from "../utils";
 import { wrapText } from "../utils";
 import { AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
 import { Tool, StructuredTool } from "langchain/tools";
-import { TpaCommandsTool, TpaListAppsTool } from "../tools/TpaCommandsTool";
-import { SmartAppControlTool } from "../tools/SmartAppControlTool";
+import { TpaCommandsTool, TpaListAppsTool } from "./tools/TpaCommandsTool";
+import { SmartAppControlTool } from "./tools/SmartAppControlTool";
 import { AppManagementAgent } from "./AppManagementAgent";
 
-import { ThinkingTool } from "../tools/ThinkingTool";
+import { ThinkingTool } from "./tools/ThinkingTool";
 import { Calculator } from "@langchain/community/tools/calculator";
 import { AppServer, PhotoData, GIVE_APP_CONTROL_OF_TOOL_RESPONSE } from "@mentra/sdk";
 import { analyzeImage } from "../utils/img-processor.util";
@@ -23,7 +23,8 @@ import * as os from "node:os";
 import {
   MIRA_SYSTEM_PROMPT,
   ResponseMode,
-  RESPONSE_CONFIGS,
+  CAMERA_RESPONSE_CONFIGS,
+  DISPLAY_RESPONSE_CONFIGS,
   MAX_CONVERSATION_HISTORY,
   MAX_CONVERSATION_AGE_MS
 } from "../constant/prompts";
@@ -542,11 +543,14 @@ Answer with ONLY "YES" if it's a follow-up question that needs context from the 
     notificationsContext: string,
     localtimeContext: string,
     hasPhoto: boolean,
-    responseMode: ResponseMode = ResponseMode.QUICK
+    responseMode: ResponseMode = ResponseMode.QUICK,
+    hasDisplay: boolean = false
   ): Promise<{ answer: string; needsCamera: boolean }> {
-    // Get configuration for the selected response mode
-    const config = RESPONSE_CONFIGS[responseMode];
-    console.log(`[Response Mode] Using ${responseMode.toUpperCase()} mode (${config.wordLimit} words, ${config.maxTokens} tokens)`);
+    // Get configuration for the selected response mode based on device type
+    const configSet = hasDisplay ? DISPLAY_RESPONSE_CONFIGS : CAMERA_RESPONSE_CONFIGS;
+    const config = configSet[responseMode];
+    const deviceType = hasDisplay ? 'DISPLAY' : 'CAMERA';
+    console.log(`[Response Mode] Using ${deviceType} ${responseMode.toUpperCase()} mode (${config.wordLimit} words, ${config.maxTokens} tokens)`);
 
     const llm = LLMProvider.getLLM(config.maxTokens).bindTools(this.agentTools);
     const toolNames = this.agentTools.map((tool) => tool.name + ": " + tool.description || "");
@@ -816,7 +820,7 @@ Answer with ONLY "YES" if it's a follow-up question that needs context from the 
       // STEP 2: Run text-based agent with appropriate response mode
       console.log(`⏱️  [+${Date.now() - startTime}ms] 🚀 Running text-based classifier...`);
       const textClassifierStart = Date.now();
-      const textResult = await this.runTextBasedAgent(query, locationInfo, notificationsContext, localtimeContext, !!photo || !!getPhotoCallback, responseMode);
+      const textResult = await this.runTextBasedAgent(query, locationInfo, notificationsContext, localtimeContext, !!photo || !!getPhotoCallback, responseMode, hasDisplay);
       console.log(`⏱️  [+${Date.now() - startTime}ms] ✅ Text classifier complete (took ${Date.now() - textClassifierStart}ms)`);
       console.log(`🤖 Camera needed:`, textResult.needsCamera);
       console.log(`🤖 Text answer:`, textResult.answer);

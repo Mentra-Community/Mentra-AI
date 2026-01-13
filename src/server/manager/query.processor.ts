@@ -76,15 +76,22 @@ export class QueryProcessor {
     console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📊 Transcription duration: ${durationSeconds}s`);
 
     // Fetch transcript from backend
-    const transcriptionResponse = await this.fetchTranscript(durationSeconds, processQueryStartTime);
+    const transcriptionResponse = await this.fetchTranscript(durationSeconds, processQueryStartTime, transcriptionStartTime);
     if (!transcriptionResponse) {
       return;
     }
 
     const rawCombinedText = transcriptionResponse.segments.map((segment: any) => segment.text).join(' ');
 
+    console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📊 Raw transcript: "${rawCombinedText}"`);
+
     // Remove wake word from query
     const query = this.wakeWordDetector.removeWakeWord(rawCombinedText);
+
+    // Clear transcripts from backend to prevent accumulation
+    this.clearTranscripts(transcriptionStartTime).catch((err: Error) => {
+      logger.warn(`Failed to clear transcripts: ${err.message}`);
+    });
 
     // Check if query is a cancellation phrase (safety net)
     if (this.wakeWordDetector.isCancellation(query)) {
@@ -170,12 +177,17 @@ export class QueryProcessor {
   /**
    * Fetch transcript from backend
    */
-  private async fetchTranscript(durationSeconds: number, processQueryStartTime: number): Promise<any | null> {
-    const backendUrl = `${this.serverUrl}/api/transcripts/${this.sessionId}?duration=${durationSeconds}`;
+  private async fetchTranscript(durationSeconds: number, processQueryStartTime: number, transcriptionStartTime?: number): Promise<any | null> {
+    // Add timestamp filter to prevent getting old transcripts
+    let backendUrl = `${this.serverUrl}/api/transcripts/${this.sessionId}?duration=${durationSeconds}`;
+    if (transcriptionStartTime && transcriptionStartTime > 0) {
+      backendUrl += `&after=${transcriptionStartTime}`;
+      console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 🕐 Filtering transcripts after timestamp: ${transcriptionStartTime} (${new Date(transcriptionStartTime).toISOString()})`);
+    }
 
     try {
       const fetchStartTime = Date.now();
-      console.log(`⏱️  [+${fetchStartTime - processQueryStartTime}ms] 🌐 Fetching transcript from backend...`);
+      console.log(`⏱️  [+${fetchStartTime - processQueryStartTime}ms] 🌐 Fetching transcript from: ${backendUrl}`);
 
       logger.debug(`[Session ${this.sessionId}]: Fetching transcript from: ${backendUrl}`);
       const transcriptResponse = await fetch(backendUrl);
@@ -217,6 +229,22 @@ export class QueryProcessor {
         { durationMs: 5000 }
       );
       return null;
+    }
+  }
+
+  /**
+   * Clear transcripts from backend to prevent accumulation
+   */
+  private async clearTranscripts(beforeTimestamp: number): Promise<void> {
+    const clearUrl = `${this.serverUrl}/api/transcripts/${this.sessionId}/clear?before=${beforeTimestamp}`;
+    try {
+      logger.debug(`[Session ${this.sessionId}]: Clearing transcripts before ${beforeTimestamp}`);
+      const response = await fetch(clearUrl, { method: 'DELETE' });
+      if (!response.ok) {
+        logger.warn(`[Session ${this.sessionId}]: Failed to clear transcripts: ${response.status}`);
+      }
+    } catch (error) {
+      logger.warn(`[Session ${this.sessionId}]: Error clearing transcripts:`, error);
     }
   }
 
