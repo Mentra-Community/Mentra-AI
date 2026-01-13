@@ -81,7 +81,18 @@ export class QueryProcessor {
       return;
     }
 
-    const rawCombinedText = transcriptionResponse.segments.map((segment: any) => segment.text).join(' ');
+    // Get the transcript text - use only the LAST segment (final or interim)
+    // Speech-to-text providers send cumulative text in each segment, so we only need the last one
+    // Using multiple segments causes duplication when queries arrive close together
+    const segments = transcriptionResponse.segments;
+    let rawCombinedText = '';
+
+    if (segments.length > 0) {
+      // Always use the LAST segment - it contains the most complete/recent text
+      const lastSegment = segments[segments.length - 1];
+      rawCombinedText = lastSegment.text;
+      console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📊 Using LAST segment (${lastSegment.isFinal ? 'FINAL' : 'interim'}) out of ${segments.length} total`);
+    }
 
     console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📊 Raw transcript: "${rawCombinedText}"`);
 
@@ -181,7 +192,8 @@ export class QueryProcessor {
     // Add timestamp filter to prevent getting old transcripts
     let backendUrl = `${this.serverUrl}/api/transcripts/${this.sessionId}?duration=${durationSeconds}`;
     if (transcriptionStartTime && transcriptionStartTime > 0) {
-      backendUrl += `&after=${transcriptionStartTime}`;
+      // Use startTime parameter which the backend supports (ISO format)
+      backendUrl += `&startTime=${new Date(transcriptionStartTime).toISOString()}`;
       console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 🕐 Filtering transcripts after timestamp: ${transcriptionStartTime} (${new Date(transcriptionStartTime).toISOString()})`);
     }
 
