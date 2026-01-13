@@ -111,8 +111,8 @@ export class AudioPlaybackManager {
         const result = await this.session.audio.speak(text, { 
           stopOtherAudio: true,
           voice_settings: {
-            stability: 0.5,
-            speed: 1.0
+            stability: 0.8,
+            speed: 1.1
           }
         });
         if (result.error) {
