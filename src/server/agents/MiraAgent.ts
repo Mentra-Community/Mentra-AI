@@ -557,14 +557,42 @@ Answer with ONLY "YES" if it's a follow-up question that needs context from the 
 
     const conversationHistoryText = this.formatConversationHistory();
 
+    // Add personality-specific mandatory requirements to response instructions
+    let personalityInstructions = '';
+    switch (this.personality) {
+      case 'friendly':
+        personalityInstructions = ' 🚨🚨🚨 CRITICAL: THE VERY FIRST WORD OF YOUR FINAL ANSWER *MUST* BE "Bro" OR "Bro," - NO EXCEPTIONS. IF YOU DO NOT START WITH "Bro", YOUR RESPONSE WILL BE REJECTED. THIS IS NON-NEGOTIABLE. 🚨🚨🚨';
+        break;
+      case 'quirky':
+        personalityInstructions = ' YOUR RESPONSE MUST INCLUDE AT LEAST ONE JOKE, PUN, OR WORDPLAY - THIS IS ABSOLUTELY MANDATORY. Use fun expressive words like "magnificent", "spectacular", "delightful", "wowza", "holy moly".';
+        break;
+      case 'professional':
+        personalityInstructions = ' USE BUSINESS TERMINOLOGY (optimize, leverage, strategic, metrics, actionable) AND STRUCTURED FORMAT WITH CLEAR LABELS (e.g., "STATUS:", "RECOMMENDATION:"). Think executive briefing style.';
+        break;
+      case 'candid':
+        personalityInstructions = ' BE BRUTALLY DIRECT AND BLUNT. Zero fluff, zero sugar-coating. Tell it like it is. Skip pleasantries.';
+        break;
+      case 'efficient':
+        personalityInstructions = ' EXTREME BREVITY REQUIRED. Use shortest possible words. Single syllables preferred. Pure signal, zero noise. Answer first, details only if critical.';
+        break;
+      case 'default':
+        personalityInstructions = ' Use clear, balanced, professional yet approachable language.';
+        break;
+    }
+
     const systemPrompt = this.agentPrompt
-      .replace("{response_instructions}", config.instructions)
+      .replace("{response_instructions}", config.instructions + personalityInstructions)
       .replace("{tool_names}", toolNames.join("\n"))
       .replace("{location_context}", locationInfo)
       .replace("{notifications_context}", notificationsContext)
       .replace("{timezone_context}", localtimeContext)
       .replace("{conversation_history}", conversationHistoryText)
       .replace("{photo_context}", photoContext);
+
+    // DEBUG: Log the first 1500 characters of the system prompt to verify personality injection
+    console.log(`\n[DEBUG] 🎭 System prompt (first 1500 chars):\n${systemPrompt.substring(0, 1500)}\n`);
+    console.log(`[DEBUG] 🎭 Personality type: ${this.personality}\n`);
+    console.log(`[DEBUG] 🎭 Response mode: ${responseMode} (${config.wordLimit} words)\n`);
 
     const messages: BaseMessage[] = [new SystemMessage(systemPrompt), new HumanMessage(query)];
 

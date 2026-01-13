@@ -108,7 +108,13 @@ export class AudioPlaybackManager {
       }
 
       try {
-        const result = await this.session.audio.speak(text, { stopOtherAudio: true });
+        const result = await this.session.audio.speak(text, { 
+          stopOtherAudio: true,
+          voice_settings: {
+            stability: 0.5,
+            speed: 1.0
+          }
+        });
         if (result.error) {
           logger.error({ error: result.error }, `[Session ${this.sessionId}]: Error speaking text:`);
         }
