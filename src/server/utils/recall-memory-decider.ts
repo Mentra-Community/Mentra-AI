@@ -8,6 +8,7 @@ import { GoogleGenAI } from '@google/genai';
 export enum RecallDecision {
   RECALL = 'recall', // Query needs memory access
   CONTINUE = 'continue', // Continue to vision decider
+  VISION_RETRY = 'vision_retry', // User is retrying a vision query (e.g., "how about now?")
 }
 
 const RECALL_DECISION_PROMPT = `You are a query classifier for a smart assistant with conversation memory.
@@ -21,6 +22,12 @@ CRITICAL - VISION QUERIES SHOULD NEVER RECALL (respond "CONTINUE"):
 - If "this"/"that" refers to a visible object, equation, sign, text, etc. = CONTINUE
 - Queries about CURRENT physical environment: "what am I working on", "what am I looking at", "what's in front of me" = CONTINUE
 - These are asking about WHAT THEY SEE RIGHT NOW, not about past conversation = CONTINUE
+
+VISION RETRY PATTERNS (respond "VISION_RETRY"):
+- User repositioning camera to try again: "how about now?", "what about now?", "and now?", "now?", "try again", "can you see it now?", "look again", "check again", "is this better?", "better?"
+- These are follow-ups to a PREVIOUS CAMERA REQUEST where the AI couldn't see what the user wanted
+- They need the camera AND need context from the previous vision query
+- Example: User asked "what plant is this?", AI said "I can't see a plant", User says "how about now?" = VISION_RETRY
 
 DEFINITELY NEEDS MEMORY RECALL (respond "RECALL"):
 - Asking about previous question/response: "what did I ask", "what did you say", "my last question"
@@ -40,18 +47,21 @@ DOES NOT NEED MEMORY RECALL (respond "CONTINUE"):
 - Greetings: "hi", "hello", "what's up"
 - Questions that don't reference past conversation
 - "tell me more" without clear reference to conversation (ambiguous, continue)
+- ACTION REQUESTS that build on previous topics: "make it longer", "give me more", "do it again but with X", "let's make it 100", "now do X" = CONTINUE (these are NEW requests, not asking to recall info)
+- Follow-up requests to expand/modify: "can you add more?", "make it bigger", "try another one", "give me 100 digits" = CONTINUE
 
 IMPORTANT CONTEXT CLUES:
 - "previously", "earlier", "before" + conversation verb (asked, said, mentioned, discussed) = RECALL
 - "back to the [noun]" when referring to conversation topic = RECALL
 - "that [noun] I/we" when referencing past discussion = RECALL
 - "this/that" + physical object (equation, sign, item, food, plant) = CONTINUE (vision query)
+- Short retry phrases like "how about now?", "and now?", "try again" after a vision query = VISION_RETRY
 
 {conversationContext}
 
 Query: "{query}"
 
-Respond with ONLY one word: "RECALL" or "CONTINUE".`;
+Respond with ONLY one word: "RECALL", "CONTINUE", or "VISION_RETRY".`;
 
 // Simple type for conversation messages
 export interface ConversationMessage {
@@ -120,6 +130,51 @@ export class RecallMemoryDecider {
       }
     }
 
+    // Vision retry patterns - user asking to try again with camera (e.g., repositioning what they're showing)
+    // These need special handling to inject the previous query context
+    const visionRetryPatterns = [
+      /^how about now\??$/i,
+      /^what about now\??$/i,
+      /^and now\??$/i,
+      /^now\??$/i,
+      /^try again\??$/i,
+      /can you see (it|this|that)( now)?\??/i,
+      /^look again\??$/i,
+      /^check again\??$/i,
+      /^how('s| is) this\??$/i,
+      /^is this better\??$/i,
+      /^better\??$/i,
+      /^okay how about now\??$/i,
+      /^ok how about now\??$/i,
+    ];
+
+    for (const pattern of visionRetryPatterns) {
+      if (pattern.test(queryLower)) {
+        console.log(`🧠 RecallMemoryDecider: "${query}" -> VISION_RETRY (fast check: vision retry pattern detected)`);
+        return RecallDecision.VISION_RETRY;
+      }
+    }
+
+    // Action-based follow-up patterns - these are NEW REQUESTS that build on previous topics
+    // They should CONTINUE to normal flow (MiraAgent handles follow-up context injection)
+    const actionFollowUpPatterns = [
+      /^(let's |lets )?(make|do) it \d+/i, // "let's make it 100 digits", "make it 50"
+      /^(give|show) me (more|\d+)/i, // "give me more", "give me 100 digits"
+      /^(can you )?(add|include) more/i, // "add more", "can you add more?"
+      /^(make|do) (it|that) (longer|shorter|bigger|smaller)/i, // "make it longer"
+      /^(try|do) (it )?(again|another)/i, // "try another one", "do it again"
+      /^now (do|make|give|show|try)/i, // "now do X", "now give me Y"
+      /^\d+ (more |)?(digits|words|items|examples)/i, // "100 more digits", "50 words"
+      /^(more|another|one more)/i, // "more", "another one", "one more"
+    ];
+
+    for (const pattern of actionFollowUpPatterns) {
+      if (pattern.test(queryLower)) {
+        console.log(`🧠 RecallMemoryDecider: "${query}" -> CONTINUE (fast check: action follow-up pattern detected)`);
+        return RecallDecision.CONTINUE;
+      }
+    }
+
     // Clear recall patterns
     if (/what did (i|you) (just )?(ask|say|mention)/i.test(queryLower)) {
       console.log(`🧠 RecallMemoryDecider: "${query}" -> RECALL (fast check: what did I/you ask/say)`);
@@ -151,7 +206,7 @@ export class RecallMemoryDecider {
 
   /**
    * Determine if a query needs memory recall
-   * Returns RECALL or CONTINUE
+   * Returns RECALL, CONTINUE, or VISION_RETRY
    * @param query - The user's query
    * @param conversationHistory - Optional recent conversation for context
    */
@@ -182,6 +237,8 @@ export class RecallMemoryDecider {
 
       if (result === 'RECALL' || result.startsWith('RECALL')) {
         return RecallDecision.RECALL;
+      } else if (result === 'VISION_RETRY' || result.startsWith('VISION_RETRY')) {
+        return RecallDecision.VISION_RETRY;
       } else {
         return RecallDecision.CONTINUE;
       }

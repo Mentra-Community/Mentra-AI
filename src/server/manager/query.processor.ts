@@ -159,8 +159,70 @@ export class QueryProcessor {
       // Get conversation history for context-aware decisions
       const conversationHistory = this.miraAgent.getConversationHistoryForDecider();
 
-      // Check if this is a memory recall query (AI-powered with conversation context)
+      // Check if this is a memory recall or vision retry query (AI-powered with conversation context)
       const recallDecision = await this.recallMemoryDecider.checkIfNeedsRecall(query, conversationHistory);
+
+      // Handle VISION_RETRY - user is retrying a vision query (e.g., "how about now?")
+      if (recallDecision === RecallDecision.VISION_RETRY) {
+        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 🔄 VISION RETRY DETECTED - Injecting previous context`);
+
+        // Get the last conversation turn to find what the user was originally asking about
+        const fullHistory = this.miraAgent.getFullConversationHistory();
+        let enhancedQuery = query;
+
+        if (fullHistory.length > 0) {
+          // Get the most recent turn - this should contain the previous vision query
+          const lastTurn = fullHistory[fullHistory.length - 1];
+          // Enhance the retry query with the previous context
+          enhancedQuery = `${lastTurn.query}\n\n[USER IS NOW SAYING: "${query}" - This is a retry/follow-up. They are repositioning to show you what they originally asked about. Answer their original question: "${lastTurn.query}"]`;
+          console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📚 Enhanced retry query with previous context: "${lastTurn.query}"`);
+        }
+
+        // Route to CameraQuestionAgent with enhanced query
+        const photoStartTime = Date.now();
+        console.log(`⏱️  [+${photoStartTime - processQueryStartTime}ms] 📸 Getting photo for vision retry...`);
+        const photo = await this.photoManager.getPhoto(false);
+        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ${photo ? '✅ Photo retrieved' : '⚪ No photo available (will wait only if needed)'}`);
+
+        // Send query to frontend
+        if (this.chatManager && query.trim().length > 0 && !this.currentQueryMessageId) {
+          this.currentQueryMessageId = this.chatManager.addUserMessage(this.userId, query);
+          this.chatManager.setProcessing(this.userId, true);
+        }
+
+        // Create callback for agent to wait for photo if needed
+        const getPhotoCallback = async (): Promise<PhotoData | null> => {
+          console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📸 Agent requested photo wait - calling getPhoto(true)...`);
+          return await this.photoManager.getPhoto(true);
+        };
+
+        const hasDisplay = this.session.capabilities?.hasDisplay;
+        const inputData = { query: enhancedQuery, photo, getPhotoCallback, hasDisplay };
+
+        if (this.cameraQuestionAgent) {
+          console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📷 Routing vision retry to CameraQuestionAgent...`);
+          const agentResponse = await this.cameraQuestionAgent.handleContext(inputData);
+          console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ✅ CameraQuestionAgent completed`);
+
+          // Store the conversation turn in MiraAgent (use original query, not enhanced)
+          const responseText = agentResponse?.answer || (typeof agentResponse === 'string' ? agentResponse : '');
+          if (responseText) {
+            this.miraAgent.addExternalConversationTurn(query, responseText);
+            console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📚 Added vision retry response to MiraAgent conversation history`);
+          }
+
+          stopProcessingSounds();
+          await this.handleAgentResponse(agentResponse, query, photo, processQueryStartTime);
+        } else {
+          // Fallback to MiraAgent if no CameraQuestionAgent
+          console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 🤖 No CameraQuestionAgent - Routing to MiraAgent...`);
+          const agentResponse = await this.miraAgent.handleContext(inputData);
+          stopProcessingSounds();
+          await this.handleAgentResponse(agentResponse, query, photo, processQueryStartTime);
+        }
+        return;
+      }
+
       if (recallDecision === RecallDecision.RECALL) {
         console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 🧠 MEMORY RECALL DETECTED - Skipping vision check`);
         stopProcessingSounds();
