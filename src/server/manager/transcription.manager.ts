@@ -2,7 +2,7 @@ import {
   AppSession,
   logger as _logger
 } from '@mentra/sdk';
-import { MiraAgent } from '../agents';
+import { MiraAgent, CameraQuestionAgent } from '../agents';
 import { TranscriptProcessor } from '../utils';
 import { ChatManager } from './chat.manager';
 import { notificationsManager } from './notifications.manager';
@@ -38,12 +38,16 @@ export class TranscriptionManager {
   private transcriptionUnsubscribe?: () => void;
   private headWindowTimeoutId?: NodeJS.Timeout;
 
+  // Clarification mode flag - prevents state reset when waiting for yes/no response
+  private isWaitingForClarification: boolean = false;
+
   // Extracted managers and services
   private photoManager: PhotoManager;
   private locationService: LocationService;
   private audioManager: AudioPlaybackManager;
   private wakeWordDetector: WakeWordDetector;
   private queryProcessor: QueryProcessor;
+  private cameraQuestionAgent: CameraQuestionAgent;
 
   constructor(
     session: AppSession,
@@ -65,16 +69,19 @@ export class TranscriptionManager {
     this.locationService = new LocationService(sessionId);
     this.audioManager = new AudioPlaybackManager(session, sessionId);
     this.wakeWordDetector = new WakeWordDetector();
+    this.cameraQuestionAgent = new CameraQuestionAgent(userId);
     this.queryProcessor = new QueryProcessor({
       session,
       sessionId,
       userId,
       miraAgent,
+      cameraQuestionAgent: this.cameraQuestionAgent,
       serverUrl,
       chatManager,
       photoManager: this.photoManager,
       audioManager: this.audioManager,
-      wakeWordDetector: this.wakeWordDetector
+      wakeWordDetector: this.wakeWordDetector,
+      onRequestClarification: () => this.startClarificationListening(),
     });
 
     // Use same settings as LiveCaptions for now
@@ -247,6 +254,57 @@ export class TranscriptionManager {
   }
 
   /**
+   * Start a clarification listening session (for yes/no responses)
+   * Called when vision query decider returns UNSURE
+   */
+  private startClarificationListening(): void {
+    console.log(`🎙️ [${new Date().toISOString()}] Starting clarification listening session`);
+
+    // Clear timeouts
+    if (this.timeoutId) {
+      clearTimeout(this.timeoutId);
+      this.timeoutId = undefined;
+    }
+    if (this.maxListeningTimeoutId) {
+      clearTimeout(this.maxListeningTimeoutId);
+      this.maxListeningTimeoutId = undefined;
+    }
+    this.transcriptProcessor.clear();
+
+    // Set flag to indicate we're waiting for clarification
+    // This will be checked in processQuery finally block
+    this.isWaitingForClarification = true;
+
+    // Use setTimeout to ensure this runs AFTER the current processQuery finally block completes
+    setTimeout(() => {
+      // Play the start listening sound
+      this.audioManager.playStartListening();
+
+      // Show listening indicator
+      this.session.layouts.showTextWall("Listening for yes or no...", { durationMs: 10000 });
+
+      // Set up to listen for the next transcription (yes/no response)
+      this.isListeningToQuery = true;
+      this.isProcessingQuery = false;
+      this.transcriptionStartTime = Date.now();
+
+      console.log(`🎙️ [${new Date().toISOString()}] Clarification listening active (isListeningToQuery: ${this.isListeningToQuery})`);
+
+      // Set a 10-second timeout for clarification response
+      this.maxListeningTimeoutId = setTimeout(() => {
+        console.log(`[Session ${this.sessionId}]: Clarification timeout (10s) reached`);
+        this.isWaitingForClarification = false;
+        if (this.timeoutId) {
+          clearTimeout(this.timeoutId);
+          this.timeoutId = undefined;
+        }
+        // Process with whatever we have (or empty) - will default to "no" for camera
+        this.processQuery("no", 10000);
+      }, 10000);
+    }, 100); // Small delay to let processQuery finish first
+  }
+
+  /**
    * Handle head position updates from the session
    */
   public handleHeadPosition(headPositionData: any): void {
@@ -321,6 +379,15 @@ export class TranscriptionManager {
     } catch (error) {
       logger.error(error, `[Session ${this.sessionId}]: Error in processQuery:`);
     } finally {
+      // If waiting for clarification response, don't reset state yet
+      // but DO release the processing lock so the clarification response can be processed
+      if (this.isWaitingForClarification) {
+        console.log(`⏱️  [${new Date().toISOString()}] 🎙️ Waiting for clarification - skipping state reset but releasing lock`);
+        this.isWaitingForClarification = false; // Reset flag, startClarificationListening will handle the rest
+        this.isProcessingQuery = false; // Release lock so clarification response can be processed
+        return;
+      }
+
       // CRITICAL: Reset state IMMEDIATELY to prevent transcript accumulation
       // These must be reset synchronously before the setTimeout delay
       console.log(`⏱️  [${new Date().toISOString()}] 🧹 Resetting transcription state (transcriptionStartTime: ${this.transcriptionStartTime} -> 0)`);

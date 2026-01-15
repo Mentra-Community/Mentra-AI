@@ -235,6 +235,19 @@ export class MiraAgent implements Agent {
   }
 
   /**
+   * Get conversation history formatted for the VisionQueryDecider
+   * Returns last N turns as user/assistant message pairs
+   */
+  public getConversationHistoryForDecider(): Array<{ role: 'user' | 'assistant'; content: string }> {
+    const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+    for (const turn of this.conversationHistory) {
+      messages.push({ role: 'user', content: turn.query });
+      messages.push({ role: 'assistant', content: turn.response });
+    }
+    return messages;
+  }
+
+  /**
    * Classifies query complexity to determine appropriate response mode
    * Uses heuristics and pattern matching for fast classification
    *

@@ -105,10 +105,55 @@ export const cancellationPhrases = [
  * Vision keywords that indicate a query requires camera/image analysis
  */
 export const visionKeywords = [
+  // ============ GENERAL IDENTIFICATION ============
   'what am i looking at', 'what is this', 'what is that',
-  'identify this', 'what do you see', 'describe what',
-  'tell me about this', 'what\'s in front of me', 'can you see',
-  'look at this', 'read this', 'read that', 'what color',
-  'how many', 'describe this', 'describe that', 'what does this say',
-  'what\'s this', 'what\'s that', 'whats this', 'whats that'
+  'identify this', 'identify that', 'what do you see', 'describe what',
+  'tell me about this', 'tell me about that', 'what\'s in front of me',
+  'can you see', 'look at this', 'look at that', 'check this out',
+  'what\'s this', 'what\'s that', 'whats this', 'whats that',
+  'what kind of', 'what type of', 'what brand', 'what model',
+  'who is this', 'who is that', 'who\'s this', 'who\'s that',
+
+  // ============ READING / OCR ============
+  'read this', 'read that', 'read it', 'what does this say',
+  'what does that say', 'what does it say', 'what is written',
+  'can you read', 'read the text', 'read the sign', 'read the label',
+  'what\'s written', 'whats written', 'translate this', 'translate that',
+
+  // ============ COUNTING / COLORS / QUANTITIES ============
+  'what color', 'what colour', 'how many', 'how much',
+  'count the', 'count how many', 'how big', 'how small',
+  'how tall', 'how long', 'how wide', 'what size',
+
+  // ============ DESCRIPTION ============
+  'describe this', 'describe that', 'describe what you see',
+  'tell me what you see', 'explain what you see',
+  'what do you notice', 'what can you tell me about',
+
+  // ============ PROBLEM SOLVING (implies looking at something) ============
+  'solve this', 'fix this', 'what\'s wrong', 'whats wrong',
+  'what is wrong', 'how do i fix', 'how do i solve', 'how can i fix',
+  'help me fix', 'help me solve', 'help me with this',
+  'what\'s the problem', 'whats the problem', 'what is the problem',
+  'diagnose this', 'troubleshoot this', 'debug this',
+  'why isn\'t this working', 'why isnt this working',
+  'why is this broken', 'why doesn\'t this work', 'why doesnt this work',
+  'this isn\'t working', 'this isnt working', 'this doesn\'t work',
+  'not working', 'broken', 'stuck', 'jammed',
+  'what should i do', 'what do i do', 'how do i repair',
+
+  // ============ INSTRUCTIONS (implies looking at something) ============
+  'how do i use this', 'how do i use that', 'how does this work',
+  'how does that work', 'show me how', 'teach me how',
+  'how to use this', 'how to use that', 'what does this do',
+  'what does that do', 'how do i operate', 'how to operate',
+  'how do i turn this on', 'how do i turn this off',
+  'how do i set this up', 'how to set up', 'where do i',
+  'which button', 'what button', 'where is the', 'how do i connect',
+  'guide me', 'walk me through', 'step by step',
+
+  // ============ LOCATION / SPATIAL ============
+  'where is this', 'where is that', 'where am i',
+  'what place is this', 'what building', 'what store',
+  'what restaurant', 'what street'
 ];

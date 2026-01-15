@@ -4,9 +4,9 @@ import {
   GIVE_APP_CONTROL_OF_TOOL_RESPONSE,
   logger as _logger
 } from '@mentra/sdk';
-import { MiraAgent } from '../agents';
+import { MiraAgent, CameraQuestionAgent } from '../agents';
 import { wrapText } from '../utils';
-import { visionKeywords } from '../constant/wakeWords';
+import { getVisionQueryDecider, VisionQueryDecider, VisionDecision } from '../utils/vision-query-decider';
 import { ChatManager } from './chat.manager';
 import { PhotoManager } from './photo.manager';
 import { AudioPlaybackManager } from './audio-playback.manager';
@@ -19,11 +19,22 @@ interface QueryProcessorConfig {
   sessionId: string;
   userId: string;
   miraAgent: MiraAgent;
+  cameraQuestionAgent?: CameraQuestionAgent;
   serverUrl: string;
   chatManager?: ChatManager;
   photoManager: PhotoManager;
   audioManager: AudioPlaybackManager;
   wakeWordDetector: WakeWordDetector;
+  onRequestClarification?: () => void; // Callback to trigger new listening session
+}
+
+/**
+ * Pending clarification state for ambiguous vision queries
+ */
+interface PendingClarification {
+  originalQuery: string;
+  photo: PhotoData | null;
+  processQueryStartTime: number;
 }
 
 /**
@@ -34,23 +45,30 @@ export class QueryProcessor {
   private sessionId: string;
   private userId: string;
   private miraAgent: MiraAgent;
+  private cameraQuestionAgent?: CameraQuestionAgent;
   private serverUrl: string;
   private chatManager?: ChatManager;
   private photoManager: PhotoManager;
   private audioManager: AudioPlaybackManager;
   private wakeWordDetector: WakeWordDetector;
   private currentQueryMessageId?: string;
+  private visionQueryDecider: VisionQueryDecider;
+  private onRequestClarification?: () => void;
+  private pendingClarification: PendingClarification | null = null;
 
   constructor(config: QueryProcessorConfig) {
     this.session = config.session;
     this.sessionId = config.sessionId;
     this.userId = config.userId;
     this.miraAgent = config.miraAgent;
+    this.cameraQuestionAgent = config.cameraQuestionAgent;
     this.serverUrl = config.serverUrl;
     this.chatManager = config.chatManager;
     this.photoManager = config.photoManager;
     this.audioManager = config.audioManager;
     this.wakeWordDetector = config.wakeWordDetector;
+    this.visionQueryDecider = getVisionQueryDecider();
+    this.onRequestClarification = config.onRequestClarification;
   }
 
   /**
@@ -120,6 +138,12 @@ export class QueryProcessor {
       return;
     }
 
+    // Check if this is a clarification response to a pending query
+    if (this.pendingClarification) {
+      await this.handleClarificationResponse(query);
+      return;
+    }
+
     // Play processing sounds
     const stopProcessingSounds = await this.audioManager.playProcessingSounds();
 
@@ -129,11 +153,41 @@ export class QueryProcessor {
       // Show the query being processed
       this.showProcessingMessage(query);
 
-      // Detect vision queries to clear conversation history
-      const isVisionQuery = this.isVisionQuery(query);
+      // Get conversation history for context-aware vision detection
+      const conversationHistory = this.miraAgent.getConversationHistoryForDecider();
+
+      // Detect vision queries using AI decider (YES/NO/UNSURE)
+      const visionDecision = await this.visionQueryDecider.checkIfNeedsCamera(query, conversationHistory);
+      console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 🤖 Vision decision: ${visionDecision}`);
+
+      // Handle UNSURE case - ask user for clarification
+      if (visionDecision === VisionDecision.UNSURE && this.onRequestClarification) {
+        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ❓ UNSURE - Asking user for clarification`);
+        stopProcessingSounds();
+
+        // Get photo now in case they say yes
+        const photo = await this.photoManager.getPhoto(false);
+
+        // Store the pending query
+        this.pendingClarification = {
+          originalQuery: query,
+          photo,
+          processQueryStartTime,
+        };
+
+        // Ask the user for clarification
+        await this.audioManager.showOrSpeakText("Do you want me to use the camera to see what you're looking at?");
+
+        // Trigger new listening session
+        this.onRequestClarification();
+        return;
+      }
+
+      const isVisionQuery = visionDecision === VisionDecision.YES;
       if (isVisionQuery) {
-        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 👁️  VISION QUERY DETECTED - Clearing conversation history`);
-        this.miraAgent.clearConversationHistory();
+        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 👁️  VISION QUERY DETECTED`);
+        // NOTE: We no longer clear conversation history here to preserve context for follow-up questions
+        // Users may ask follow-up questions like "tell me more about that brand" or "what else do they make?"
       }
 
       // Get photo without waiting (non-blocking) - returns cached photo or null
@@ -141,10 +195,6 @@ export class QueryProcessor {
       console.log(`⏱️  [+${photoStartTime - processQueryStartTime}ms] 📸 Getting photo from wake word activation...`);
       const photo = await this.photoManager.getPhoto(false);
       console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ${photo ? '✅ Photo retrieved' : '⚪ No photo available (will wait only if needed)'}`);
-
-      // Process with agent
-      const agentStartTime = Date.now();
-      console.log(`⏱️  [+${agentStartTime - processQueryStartTime}ms] 🤖 Invoking MiraAgent.handleContext...`);
 
       // Send query to frontend if not already sent
       if (this.chatManager && query.trim().length > 0 && !this.currentQueryMessageId) {
@@ -160,10 +210,24 @@ export class QueryProcessor {
 
       const hasDisplay = this.session.capabilities?.hasDisplay;
       const inputData = { query, photo, getPhotoCallback, hasDisplay };
-      const agentResponse = await this.miraAgent.handleContext(inputData);
 
-      const agentEndTime = Date.now();
-      console.log(`⏱️  [+${agentEndTime - processQueryStartTime}ms] ✅ MiraAgent completed (took ${agentEndTime - agentStartTime}ms)`);
+      // Route to appropriate agent based on query type
+      let agentResponse: any;
+      const agentStartTime = Date.now();
+
+      // Use CameraQuestionAgent for vision queries if available
+      if (isVisionQuery && this.cameraQuestionAgent) {
+        console.log(`⏱️  [+${agentStartTime - processQueryStartTime}ms] 📷 Routing to CameraQuestionAgent...`);
+        agentResponse = await this.cameraQuestionAgent.handleContext(inputData);
+        const agentEndTime = Date.now();
+        console.log(`⏱️  [+${agentEndTime - processQueryStartTime}ms] ✅ CameraQuestionAgent completed (took ${agentEndTime - agentStartTime}ms)`);
+      } else {
+        // Use MiraAgent for general queries
+        console.log(`⏱️  [+${agentStartTime - processQueryStartTime}ms] 🤖 Invoking MiraAgent.handleContext...`);
+        agentResponse = await this.miraAgent.handleContext(inputData);
+        const agentEndTime = Date.now();
+        console.log(`⏱️  [+${agentEndTime - processQueryStartTime}ms] ✅ MiraAgent completed (took ${agentEndTime - agentStartTime}ms)`);
+      }
 
       // Stop processing sounds
       stopProcessingSounds();
@@ -275,11 +339,88 @@ export class QueryProcessor {
   }
 
   /**
-   * Check if query is a vision query
+   * Handle clarification response (yes/no) for ambiguous vision queries
    */
-  private isVisionQuery(query: string): boolean {
-    const queryLower = query.toLowerCase();
-    return visionKeywords.some(keyword => queryLower.includes(keyword));
+  private async handleClarificationResponse(response: string): Promise<void> {
+    const pending = this.pendingClarification!;
+    this.pendingClarification = null; // Clear pending state
+
+    const responseLower = response.toLowerCase().trim();
+    console.log(`🤖 Clarification response: "${responseLower}"`);
+
+    // Check if user said yes (wants camera)
+    const yesPatterns = ['yes', 'yeah', 'yep', 'yup', 'sure', 'ok', 'okay', 'please', 'do it', 'go ahead', 'use camera', 'use the camera'];
+    const noPatterns = ['no', 'nope', 'nah', 'don\'t', 'dont', 'no thanks', 'nevermind', 'never mind', 'cancel'];
+
+    let useCamera = false;
+
+    for (const pattern of yesPatterns) {
+      if (responseLower.includes(pattern)) {
+        useCamera = true;
+        break;
+      }
+    }
+
+    // Check for explicit no (overrides yes if both somehow present)
+    for (const pattern of noPatterns) {
+      if (responseLower.includes(pattern)) {
+        useCamera = false;
+        break;
+      }
+    }
+
+    console.log(`🤖 User wants camera: ${useCamera}`);
+
+    // Play processing sounds
+    const stopProcessingSounds = await this.audioManager.playProcessingSounds();
+
+    try {
+      const { originalQuery, photo, processQueryStartTime } = pending;
+
+      // Send query to frontend if not already sent
+      if (this.chatManager && originalQuery.trim().length > 0 && !this.currentQueryMessageId) {
+        this.currentQueryMessageId = this.chatManager.addUserMessage(this.userId, originalQuery);
+        this.chatManager.setProcessing(this.userId, true);
+      }
+
+      // Create callback for agent to wait for photo if needed
+      const getPhotoCallback = async (): Promise<PhotoData | null> => {
+        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📸 Agent requested photo wait - calling getPhoto(true)...`);
+        return await this.photoManager.getPhoto(true);
+      };
+
+      const hasDisplay = this.session.capabilities?.hasDisplay;
+      const inputData = { query: originalQuery, photo, getPhotoCallback, hasDisplay };
+
+      let agentResponse: any;
+      const agentStartTime = Date.now();
+
+      if (useCamera && this.cameraQuestionAgent) {
+        // User confirmed they want camera
+        console.log(`⏱️  [+${agentStartTime - processQueryStartTime}ms] 📷 User confirmed camera - Routing to CameraQuestionAgent...`);
+        this.miraAgent.clearConversationHistory();
+        agentResponse = await this.cameraQuestionAgent.handleContext(inputData);
+        const agentEndTime = Date.now();
+        console.log(`⏱️  [+${agentEndTime - processQueryStartTime}ms] ✅ CameraQuestionAgent completed (took ${agentEndTime - agentStartTime}ms)`);
+      } else {
+        // User said no or no camera agent available
+        console.log(`⏱️  [+${agentStartTime - processQueryStartTime}ms] 🤖 No camera needed - Routing to MiraAgent...`);
+        agentResponse = await this.miraAgent.handleContext(inputData);
+        const agentEndTime = Date.now();
+        console.log(`⏱️  [+${agentEndTime - processQueryStartTime}ms] ✅ MiraAgent completed (took ${agentEndTime - agentStartTime}ms)`);
+      }
+
+      // Stop processing sounds
+      stopProcessingSounds();
+
+      // Handle response
+      await this.handleAgentResponse(agentResponse, originalQuery, photo, processQueryStartTime);
+
+    } catch (error) {
+      console.error('Error handling clarification response:', error);
+      stopProcessingSounds();
+      await this.audioManager.showOrSpeakText("Sorry, there was an error processing your request.");
+    }
   }
 
   /**
