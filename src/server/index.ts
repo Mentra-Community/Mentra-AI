@@ -58,6 +58,7 @@ logger.info(`🚀🚀🚀 Starting ${PACKAGE_NAME} server on port ${PORT}... �
  */
 class MiraServer extends AppServer {
   private transcriptionManagers = new Map<string, TranscriptionManager>();
+  private userIdToSessionId = new Map<string, string>(); // Map userId to sessionId for settings updates
   private agentPerSession = new Map<string, MiraAgent>();
   private agentPerUser = new Map<string, MiraAgent>(); // Persistent agents per user
   private chatManager: ChatManager;
@@ -72,6 +73,11 @@ class MiraServer extends AppServer {
 
     // Initialize DatabaseAPI
     this.dbAPI = new DatabaseAPI();
+
+    // Set up callback to reload follow-up setting when it changes
+    this.dbAPI.setFollowUpSettingChangedCallback((userId: string) => {
+      this.reloadFollowUpSettingForUser(userId);
+    });
 
     // Set up routes after server initialization
     this.setupRoutes();
@@ -166,6 +172,7 @@ class MiraServer extends AppServer {
       session, sessionId, userId, agent, cleanServerUrl, this.chatManager, broadcastTranscription
     );
     this.transcriptionManagers.set(sessionId, transcriptionManager);
+    this.userIdToSessionId.set(userId, sessionId); // Track userId -> sessionId mapping
 
     // Welcome message
     // session.layouts.showReferenceCard(
@@ -222,6 +229,21 @@ class MiraServer extends AppServer {
     // No need to update agent context here; notifications will be passed in userContext when needed
   }
 
+  /**
+   * Reload follow-up setting for a specific user
+   * Called when the user updates their follow-up setting via the API
+   */
+  public reloadFollowUpSettingForUser(userId: string): void {
+    const sessionId = this.userIdToSessionId.get(userId);
+    if (sessionId) {
+      const manager = this.transcriptionManagers.get(sessionId);
+      if (manager) {
+        manager.reloadFollowUpSetting();
+        logger.info(`Reloaded follow-up setting for user ${userId}`);
+      }
+    }
+  }
+
   // Handle session disconnection
   protected onStop(sessionId: string, userId: string, reason: string): Promise<void> {
     logger.info(`Stopping Mira service for session ${sessionId}, user ${userId}`);
@@ -232,6 +254,9 @@ class MiraServer extends AppServer {
       manager.cleanup();
       this.transcriptionManagers.delete(sessionId);
     }
+
+    // Clean up userId -> sessionId mapping
+    this.userIdToSessionId.delete(userId);
 
     // Clean up agent for this session
     this.agentPerSession.delete(sessionId);

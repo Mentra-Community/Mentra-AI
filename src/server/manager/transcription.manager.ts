@@ -11,6 +11,7 @@ import { LocationService } from './location.service';
 import { AudioPlaybackManager } from './audio-playback.manager';
 import { WakeWordDetector } from './wake-word.detector';
 import { QueryProcessor } from './query.processor';
+import { UserSettings } from '../schemas';
 
 const logger = _logger.child({ service: 'TranscriptionManager' });
 
@@ -40,6 +41,14 @@ export class TranscriptionManager {
 
   // Clarification mode flag - prevents state reset when waiting for yes/no response
   private isWaitingForClarification: boolean = false;
+
+  // Follow-up sound setting (cached from database)
+  private followUpEnabled: boolean = true;
+  private followUpSettingLoaded: boolean = false;
+
+  // Follow-up listening mode - listens for 5 seconds without wake word after query completes
+  private isInFollowUpMode: boolean = false;
+  private followUpTimeoutId?: NodeJS.Timeout;
 
   // Extracted managers and services
   private photoManager: PhotoManager;
@@ -96,7 +105,7 @@ export class TranscriptionManager {
    * Process incoming transcription data
    */
   handleTranscription(transcriptionData: any): void {
-    console.log(`🎤 [${new Date().toISOString()}] Transcription received: "${transcriptionData.text}" (isFinal: ${transcriptionData.isFinal})`);
+    console.log(`🎤 [${new Date().toISOString()}] Transcription received: "${transcriptionData.text}" (isFinal: ${transcriptionData.isFinal}, followUpMode: ${this.isInFollowUpMode})`);
 
     // Broadcast transcription to SSE clients
     this.broadcastTranscription(transcriptionData.text, !!transcriptionData.isFinal);
@@ -109,6 +118,12 @@ export class TranscriptionManager {
     const text = transcriptionData.text;
     const cleanedText = this.wakeWordDetector.cleanText(text);
     const hasWakeWord = this.wakeWordDetector.hasWakeWord(text);
+
+    // Handle follow-up mode: no wake word required, just process the transcription
+    if (this.isInFollowUpMode) {
+      this.handleFollowUpTranscription(transcriptionData);
+      return;
+    }
 
     // Optional setting: only allow wake word within 10s after head moves down->up
     const requireHeadUpWindow = !!this.session.settings.get<boolean>('wake_requires_head_up');
@@ -234,11 +249,174 @@ export class TranscriptionManager {
   }
 
   /**
+   * Handle transcription in follow-up mode (no wake word required)
+   * User has 5 seconds to speak after the follow-up sound plays
+   */
+  private handleFollowUpTranscription(transcriptionData: any): void {
+    const text = transcriptionData.text;
+    console.log(`🔄 [${new Date().toISOString()}] Follow-up transcription: "${text}" (isFinal: ${transcriptionData.isFinal})`);
+
+    // Cancel the 5-second timeout since user is speaking
+    if (this.followUpTimeoutId) {
+      clearTimeout(this.followUpTimeoutId);
+      this.followUpTimeoutId = undefined;
+    }
+
+    // Check for cancellation phrases
+    const cleanedText = this.wakeWordDetector.cleanText(text).toLowerCase().trim();
+    if (this.wakeWordDetector.isCancellation(cleanedText)) {
+      console.log(`🚫 [${new Date().toISOString()}] Follow-up cancelled by user`);
+      this.cancelFollowUpMode();
+      return;
+    }
+
+    // Request photo for potential vision query
+    if (!this.photoManager.hasPhoto() && !this.photoManager.isRequesting()) {
+      this.photoManager.requestPhoto();
+    }
+
+    // Start transcription timer if not already started
+    if (this.transcriptionStartTime === 0) {
+      this.transcriptionStartTime = Date.now();
+      console.log(`⏱️  [${new Date().toISOString()}] 🎙️ Started follow-up transcription at: ${this.transcriptionStartTime}`);
+    }
+
+    // Show the live query (no "Listening..." prefix for follow-up)
+    const displayText = this.wakeWordDetector.removeWakeWord(text); // Remove wake word if user says it anyway
+    if (displayText.trim().length > 0) {
+      const formatted = 'Follow-up...\n\n' + this.transcriptProcessor.processString(displayText, !!transcriptionData.isFinal).trim();
+      this.session.layouts.showTextWall(formatted, { durationMs: 20000 });
+    }
+
+    // Set timer to process the follow-up query
+    let timerDuration: number;
+    if (transcriptionData.isFinal) {
+      timerDuration = 1500; // Shorter timeout for follow-ups
+    } else {
+      timerDuration = 2000;
+    }
+
+    // Clear any existing timeout
+    if (this.timeoutId) {
+      clearTimeout(this.timeoutId);
+    }
+
+    // Set a new timeout to process the follow-up query
+    this.timeoutId = setTimeout(() => {
+      this.processFollowUpQuery(text, timerDuration);
+    }, timerDuration);
+  }
+
+  /**
+   * Start follow-up listening mode after a query completes
+   * Listens for 5 seconds without requiring wake word
+   */
+  private async startFollowUpListening(): Promise<void> {
+    console.log(`🔔 [${new Date().toISOString()}] Starting follow-up listening mode (5 second window)`);
+
+    // Play the follow-up sound
+    await this.audioManager.playFollowUp();
+    console.log(`🔔 [${new Date().toISOString()}] Follow-up sound completed`);
+
+    // Enter follow-up mode
+    this.isInFollowUpMode = true;
+    this.isProcessingQuery = false;
+    this.transcriptionStartTime = 0;
+    this.transcriptProcessor.clear();
+
+    // Set 5-second timeout to cancel follow-up mode if no response
+    this.followUpTimeoutId = setTimeout(() => {
+      console.log(`⏰ [${new Date().toISOString()}] Follow-up timeout (5s) - no response, returning to normal mode`);
+      this.cancelFollowUpMode();
+    }, 5000);
+  }
+
+  /**
+   * Cancel follow-up mode and return to normal wake word detection
+   */
+  private cancelFollowUpMode(): void {
+    console.log(`🚫 [${new Date().toISOString()}] Cancelling follow-up mode`);
+
+    this.isInFollowUpMode = false;
+    this.isProcessingQuery = false;
+
+    if (this.followUpTimeoutId) {
+      clearTimeout(this.followUpTimeoutId);
+      this.followUpTimeoutId = undefined;
+    }
+    if (this.timeoutId) {
+      clearTimeout(this.timeoutId);
+      this.timeoutId = undefined;
+    }
+
+    this.transcriptionStartTime = 0;
+    this.transcriptProcessor.clear();
+    this.photoManager.clearPhoto();
+
+    console.log(`🔓 [${new Date().toISOString()}] Back to normal mode - waiting for wake word`);
+  }
+
+  /**
+   * Process a follow-up query (similar to processQuery but handles follow-up state)
+   */
+  private async processFollowUpQuery(rawText: string, timerDuration: number): Promise<void> {
+    // Exit follow-up mode since we're now processing
+    this.isInFollowUpMode = false;
+
+    if (this.followUpTimeoutId) {
+      clearTimeout(this.followUpTimeoutId);
+      this.followUpTimeoutId = undefined;
+    }
+
+    // Prevent multiple queries from processing simultaneously
+    if (this.isProcessingQuery) {
+      return;
+    }
+
+    this.isProcessingQuery = true;
+    console.log(`🔄 [${new Date().toISOString()}] Processing follow-up query: "${rawText}"`);
+
+    try {
+      // Remove wake word if user said it anyway (habit)
+      const cleanedText = this.wakeWordDetector.removeWakeWord(rawText);
+      await this.queryProcessor.processQuery(cleanedText, timerDuration, this.transcriptionStartTime);
+    } catch (error) {
+      logger.error(error, `[Session ${this.sessionId}]: Error in processFollowUpQuery:`);
+    } finally {
+      // Reset state after follow-up query
+      console.log(`⏱️  [${new Date().toISOString()}] 🧹 Resetting state after follow-up query`);
+      this.transcriptionStartTime = 0;
+      this.isListeningToQuery = false;
+      this.transcriptProcessor.clear();
+      this.queryProcessor.clearCurrentQueryMessageId();
+      this.photoManager.clearPhoto();
+
+      if (this.timeoutId) {
+        clearTimeout(this.timeoutId);
+        this.timeoutId = undefined;
+      }
+      if (this.maxListeningTimeoutId) {
+        clearTimeout(this.maxListeningTimeoutId);
+        this.maxListeningTimeoutId = undefined;
+      }
+
+      // Check if we should start another follow-up listening session
+      if (this.followUpEnabled) {
+        await this.startFollowUpListening();
+      } else {
+        this.isProcessingQuery = false;
+        console.log(`🔓 [${new Date().toISOString()}] Processing lock released - ready for next query`);
+      }
+    }
+  }
+
+  /**
    * Reset all state flags and timers
    */
   private resetState(): void {
     this.isListeningToQuery = false;
     this.isProcessingQuery = false;
+    this.isInFollowUpMode = false;
     this.photoManager.clearPhoto();
     this.transcriptionStartTime = 0;
     if (this.timeoutId) {
@@ -248,6 +426,10 @@ export class TranscriptionManager {
     if (this.maxListeningTimeoutId) {
       clearTimeout(this.maxListeningTimeoutId);
       this.maxListeningTimeoutId = undefined;
+    }
+    if (this.followUpTimeoutId) {
+      clearTimeout(this.followUpTimeoutId);
+      this.followUpTimeoutId = undefined;
     }
     this.transcriptProcessor.clear();
     this.queryProcessor.clearCurrentQueryMessageId();
@@ -353,6 +535,33 @@ export class TranscriptionManager {
    */
   public initTranscriptionSubscription(): void {
     this.ensureTranscriptionSubscribed();
+    // Load follow-up setting on initialization
+    this.loadFollowUpSetting();
+  }
+
+  /**
+   * Load the followUpEnabled setting from the database
+   */
+  private async loadFollowUpSetting(): Promise<void> {
+    try {
+      const settings = await UserSettings.findOne({ userId: this.userId });
+      if (settings) {
+        this.followUpEnabled = settings.followUpEnabled ?? true;
+        console.log(`🔔 [Session ${this.sessionId}]: Follow-up sound ${this.followUpEnabled ? 'enabled' : 'disabled'}`);
+      }
+      this.followUpSettingLoaded = true;
+    } catch (error) {
+      logger.warn({ error }, 'Failed to load follow-up setting, defaulting to enabled');
+      this.followUpEnabled = true;
+      this.followUpSettingLoaded = true;
+    }
+  }
+
+  /**
+   * Reload the followUpEnabled setting (called when setting changes)
+   */
+  public async reloadFollowUpSetting(): Promise<void> {
+    await this.loadFollowUpSetting();
   }
 
   /**
@@ -406,12 +615,15 @@ export class TranscriptionManager {
         this.maxListeningTimeoutId = undefined;
       }
 
-      // Add a small delay before accepting new queries to prevent accidental wake word
-      // detection immediately after audio completes (audio is now awaited in query processor)
-      setTimeout(() => {
+      // Start follow-up listening mode if enabled
+      // This plays the follow-up sound and waits 5 seconds for user response
+      if (this.followUpEnabled) {
+        await this.startFollowUpListening();
+      } else {
+        // Release processing lock immediately if follow-up is disabled
         this.isProcessingQuery = false;
         console.log(`🔓 [${new Date().toISOString()}] Processing lock released - ready for next query`);
-      }, 1000); // Short 1s cooldown after audio completes
+      }
     }
   }
 
@@ -444,12 +656,16 @@ export class TranscriptionManager {
   cleanup(): void {
     this.audioManager.setShuttingDown(true);
     this.isProcessingQuery = false;
+    this.isInFollowUpMode = false;
 
     if (this.timeoutId) {
       clearTimeout(this.timeoutId);
     }
     if (this.maxListeningTimeoutId) {
       clearTimeout(this.maxListeningTimeoutId);
+    }
+    if (this.followUpTimeoutId) {
+      clearTimeout(this.followUpTimeoutId);
     }
   }
 }

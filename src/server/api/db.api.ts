@@ -10,12 +10,23 @@ const DEFAULT_USER_SETTINGS = {
   visionModel: 'Gemini Flash Latest',
   personality: 'default' as const,
   theme: 'light' as const,
+  followUpEnabled: true,
 };
 
 /**
  * Database API controller - handles user settings CRUD operations
  */
 export class DatabaseAPI {
+  // Callback to notify when follow-up setting changes
+  private onFollowUpSettingChanged?: (userId: string) => void;
+
+  /**
+   * Set callback for when follow-up setting changes
+   */
+  setFollowUpSettingChangedCallback(callback: (userId: string) => void): void {
+    this.onFollowUpSettingChanged = callback;
+  }
+
   /**
    * Initialize user settings with defaults if they don't exist
    * This is an internal method not exposed as a route
@@ -74,7 +85,7 @@ export class DatabaseAPI {
    */
   async upsertUserSettings(req: Request, res: Response): Promise<void> {
     try {
-      const { userId, textModel, visionModel, personality, theme } = req.body;
+      const { userId, textModel, visionModel, personality, theme, followUpEnabled } = req.body;
 
       if (!userId) {
         res.status(400).json({ error: 'userId is required' });
@@ -107,6 +118,7 @@ export class DatabaseAPI {
           ...(visionModel !== undefined && { visionModel }),
           ...(personality !== undefined && { personality }),
           ...(theme !== undefined && { theme }),
+          ...(followUpEnabled !== undefined && { followUpEnabled }),
         });
         logger.info({ userId }, 'Created new user settings with defaults');
       } else {
@@ -116,6 +128,7 @@ export class DatabaseAPI {
         if (visionModel !== undefined) updateData.visionModel = visionModel;
         if (personality !== undefined) updateData.personality = personality;
         if (theme !== undefined) updateData.theme = theme;
+        if (followUpEnabled !== undefined) updateData.followUpEnabled = followUpEnabled;
 
         settings = (await UserSettings.findOneAndUpdate(
           { userId },
@@ -220,6 +233,56 @@ export class DatabaseAPI {
       res.json(settings);
     } catch (error) {
       logger.error(error as Error, 'Error in updateTheme:');
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+
+  /**
+   * PATCH /api/db/settings/follow-up
+   * Update only the followUpEnabled setting
+   */
+  async updateFollowUpEnabled(req: Request, res: Response): Promise<void> {
+    try {
+      const { userId, followUpEnabled } = req.body;
+
+      if (!userId || followUpEnabled === undefined) {
+        res.status(400).json({ error: 'userId and followUpEnabled are required' });
+        return;
+      }
+
+      if (typeof followUpEnabled !== 'boolean') {
+        res.status(400).json({ error: 'followUpEnabled must be a boolean' });
+        return;
+      }
+
+      let settings = await UserSettings.findOne({ userId });
+
+      if (!settings) {
+        // Create with defaults and the specified followUpEnabled value
+        settings = await UserSettings.create({
+          userId,
+          ...DEFAULT_USER_SETTINGS,
+          followUpEnabled,
+        });
+        logger.info({ userId, followUpEnabled }, 'Created new user settings with followUpEnabled');
+      } else {
+        // Update existing
+        settings = (await UserSettings.findOneAndUpdate(
+          { userId },
+          { $set: { followUpEnabled } },
+          { new: true, runValidators: true }
+        ))!;
+        logger.info({ userId, followUpEnabled }, 'Updated followUpEnabled');
+      }
+
+      // Notify the server to reload the cached setting for active sessions
+      if (this.onFollowUpSettingChanged) {
+        this.onFollowUpSettingChanged(userId);
+      }
+
+      res.json(settings);
+    } catch (error) {
+      logger.error(error as Error, 'Error in updateFollowUpEnabled:');
       res.status(500).json({ error: 'Internal server error' });
     }
   }

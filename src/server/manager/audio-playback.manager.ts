@@ -6,6 +6,7 @@ const logger = _logger.child({ service: 'AudioPlaybackManager' });
 const PROCESSING_SOUND_URL = process.env.PROCESSING_SOUND_URL;
 const START_LISTENING_SOUND_URL = process.env.START_LISTENING_SOUND_URL;
 const CANCEL_MIRA_SOUND_URL = process.env.CANCEL_MIRA_SOUND_URL;
+const FOLLOW_UP_SOUND_URL = process.env.FOLLOW_UP_SOUND_URL;
 
 /**
  * Manages audio playback and text-to-speech for the session
@@ -44,6 +45,24 @@ export class AudioPlaybackManager {
         await this.session.audio.playAudio({ audioUrl: CANCEL_MIRA_SOUND_URL });
       } catch (err) {
         logger.debug('Cancellation audio failed:', err);
+      }
+    }
+  }
+
+  /**
+   * Play the follow-up sound effect (played when user finishes speaking if follow-up is enabled)
+   * Uses the activation sound (START_LISTENING_SOUND_URL) by default, or FOLLOW_UP_SOUND_URL if set
+   */
+  async playFollowUp(): Promise<void> {
+    const hasScreen = this.session.capabilities?.hasDisplay;
+    if (this.session.settings.get<boolean>("speak_response") || !hasScreen) {
+      try {
+        const soundUrl = FOLLOW_UP_SOUND_URL || START_LISTENING_SOUND_URL;
+        if (soundUrl) {
+          await this.session.audio.playAudio({ audioUrl: soundUrl });
+        }
+      } catch (err) {
+        logger.debug('Follow-up audio failed:', err);
       }
     }
   }

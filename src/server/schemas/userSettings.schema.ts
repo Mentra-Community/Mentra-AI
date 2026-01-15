@@ -6,6 +6,7 @@ export interface IUserSettings extends Document {
   visionModel: string;
   personality: 'default' | 'professional' | 'friendly' | 'candid' | 'quirky' | 'efficient';
   theme: 'light' | 'dark';
+  followUpEnabled: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -35,6 +36,10 @@ const userSettingsSchema = new Schema<IUserSettings>(
       type: String,
       enum: ['light', 'dark'],
       default: 'light',
+    },
+    followUpEnabled: {
+      type: Boolean,
+      default: true,
     },
   },
   {

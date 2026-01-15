@@ -23,6 +23,9 @@ export function createDbRoutes(dbAPI: DatabaseAPI): Router {
   // PATCH /api/db/settings/theme - Update theme only
   router.patch('/settings/theme', jsonParser, (req, res) => dbAPI.updateTheme(req, res));
 
+  // PATCH /api/db/settings/follow-up - Update followUpEnabled only
+  router.patch('/settings/follow-up', jsonParser, (req, res) => dbAPI.updateFollowUpEnabled(req, res));
+
   // DELETE /api/db/settings - Delete user settings
   router.delete('/settings', (req, res) => dbAPI.deleteUserSettings(req, res));
 

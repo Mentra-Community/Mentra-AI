@@ -5,9 +5,9 @@ import Toast from '../components/Toast';
 import { useToast } from '../components/useToast';
 import { useHandGesture } from '../tools/handGestures';
 import SettingItem from '../ui/setting-item';
-import PersonalitySetting from './personality.setting';
+import ResponseSetting from './response.setting';
 import ToggleSwitch from '../ui/toggle-switch';
-import { fetchUserSettings, updateTheme } from '../api/settings.api';
+import { updateTheme } from '../api/settings.api';
 
 interface TranscriptionEntry {
   id: string;
@@ -37,15 +37,14 @@ const settingItems: Record<string, SettingItemInfo> = {
     settingName : 'Vision Model',
     description: 'Gemini Flash Latest'
   },
-  Personality: {
-    settingName : 'Personality',
-    description: 'Manage AI Personality'
+  response: {
+    settingName : 'Response',
+    description: 'Manage AI Response'
   },
   darkMode: {
     settingName : 'Theme',
     description: ''
   }
-
 }
 
 // Hook to receive live transcription via SSE
@@ -124,7 +123,7 @@ function Settings({ onBack, isDarkMode, onToggleDarkMode, userId }: SettingsProp
   const gestureAreaRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const transcriptionScrollRef = useRef<HTMLDivElement>(null);
-  const [showPersonalitySettings, setShowPersonalitySettings] = useState(false);
+  const [showResponseSettings, setShowResponseSettings] = useState(false);
   const [devModeEnabled, setDevModeEnabled] = useState(() => {
     // Load dev mode state from localStorage
     const saved = localStorage.getItem('mira-dev-mode');
@@ -132,23 +131,6 @@ function Settings({ onBack, isDarkMode, onToggleDarkMode, userId }: SettingsProp
   });
   const { toastState, showToast, hideToast } = useToast();
 
-  // Fetch user settings from API on mount
-  useEffect(() => {
-    const loadSettings = async () => {
-      try {
-        const settings = await fetchUserSettings(userId);
-        console.log('✅ Loaded user settings:', settings);
-        // Settings are loaded, you can use them if needed
-      } catch (error) {
-        console.error('Failed to load settings:', error);
-        showToast('Failed to load settings', 'error');
-      }
-    };
-
-    if (userId) {
-      loadSettings();
-    }
-  }, [userId]);
 
   // Handle theme toggle and sync with backend
   const handleThemeToggle = async () => {
@@ -229,8 +211,8 @@ function Settings({ onBack, isDarkMode, onToggleDarkMode, userId }: SettingsProp
     };
   }, []);
 
-  // If personality settings is open, show that page
-  if (showPersonalitySettings) {
+  // If response settings is open, show that page
+  if (showResponseSettings) {
     return (
       <div
         className={`h-screen flex flex-col ${isDarkMode ? 'dark' : ''}`}
@@ -244,12 +226,12 @@ function Settings({ onBack, isDarkMode, onToggleDarkMode, userId }: SettingsProp
         <Header
           isDarkMode={isDarkMode}
           onToggleDarkMode={onToggleDarkMode}
-          onSettingsClick={() => setShowPersonalitySettings(false)}
+          onSettingsClick={() => setShowResponseSettings(false)}
         />
 
-        {/* Personality Settings Page */}
+        {/* Response Settings Page */}
         <div className="flex-1 overflow-y-auto">
-          <PersonalitySetting userId={userId} />
+          <ResponseSetting userId={userId} showToast={showToast} />
         </div>
       </div>
     );
@@ -294,10 +276,8 @@ function Settings({ onBack, isDarkMode, onToggleDarkMode, userId }: SettingsProp
             settingItemName={item.settingName}
             description={item.description}
             onClick={() => {
-              if (item.settingName === 'Personality') {
-                setShowPersonalitySettings(true);
-              } else if (item.settingName === 'Dark Mode') {
-                onToggleDarkMode();
+              if (item.settingName === 'Response') {
+                setShowResponseSettings(true);
               }
             }}
             customContent={item.settingName === 'Theme' ? (

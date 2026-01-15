@@ -8,6 +8,7 @@ export interface UserSettings {
   visionModel: string;
   personality: 'default' | 'professional' | 'friendly' | 'candid' | 'quirky' | 'efficient';
   theme: 'light' | 'dark';
+  followUpEnabled: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -84,6 +85,27 @@ export const updatePersonality = async (
 
   if (!response.ok) {
     throw new Error('Failed to update personality');
+  }
+
+  return response.json();
+};
+
+/**
+ * Update only the followUpEnabled setting
+ */
+export const updateFollowUpEnabled = async (
+  userId: string,
+  followUpEnabled: boolean
+): Promise<UserSettings> => {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/db/settings/follow-up`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, followUpEnabled }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to update follow-up setting');
   }
 
   return response.json();
