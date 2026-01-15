@@ -28,66 +28,66 @@ export const explicitWakeWords = [
   "hey montera", "hey monta", "hey minton", "hey mentaah", "hey mendro",
   "hey mentro", "hey mentu", "hey mentroa",
 
-  // weak t substitutions
-  "hey menra", "hey menna", "hey menya", "hey menwa", "hey mena",
-  "hey mehra", "hey mehraaa",
+  // // weak t substitutions
+  // "hey menra", "hey menna", "hey menya", "hey menwa", "hey mena",
+  // "hey mehra", "hey mehraaa",
 
-  // "men–" replaced
-  "hey mantra", "hey mantraa", "hey mantrae", "hey mandra", "hey mandraa",
-  "hey mantrao", "hey mentos", "hey mendes", "hey mendo", "hey mender",
-  "hey mendy", "hey mentae", "hey mentina", "hey mentila", "hey mentara",
+  // // "men–" replaced
+  // "hey mantra", "hey mantraa", "hey mantrae", "hey mandra", "hey mandraa",
+  // "hey mantrao", "hey mentos", "hey mendes", "hey mendo", "hey mender",
+  // "hey mendy", "hey mentae", "hey mentina", "hey mentila", "hey mentara",
 
-  // "-tra" replaced
-  "hey menta", "hey menton", "hey menter", "hey mentor", "hey menture",
-  "hey mento", "hey mentae", "hey mentira", "hey mentala", "hey mentura",
-  "hey mentaga", "hey mentaqa", "hey mentala",
+  // // "-tra" replaced
+  // "hey menta", "hey menton", "hey menter", "hey mentor", "hey menture",
+  // "hey mento", "hey mentae", "hey mentira", "hey mentala", "hey mentura",
+  // "hey mentaga", "hey mentaqa", "hey mentala",
 
-  // slurred variants
-  "hemetra", "hemenra", "hemencha", "hemantra", "hementra", "hementraaa",
-  "hemetrae", "haymentra", "haymetra", "aymentra", "amentra", "ehmentra",
-  "eymentra", "hamentra", "hamentro",
+  // // slurred variants
+  // "hemetra", "hemenra", "hemencha", "hemantra", "hementra", "hementraaa",
+  // "hemetrae", "haymentra", "haymetra", "aymentra", "amentra", "ehmentra",
+  // "eymentra", "hamentra", "hamentro",
 
-  // common mishears
-  "hey mitra", "hey mitro", "hey mitraaa", "hey metro", "hey matra",
-  "hey mestra", "hey mestraa", "hey mestrae", "hey mestrao", "hey mistra",
-  "hey mistraa", "hey mintra", "hey minthra", "hey myntra", "hey myntraa",
-  "hey myntrae",
+  // // common mishears
+  // "hey mitra", "hey mitro", "hey mitraaa", "hey metro", "hey matra",
+  // "hey mestra", "hey mestraa", "hey mestrae", "hey mestrao", "hey mistra",
+  // "hey mistraa", "hey mintra", "hey minthra", "hey myntra", "hey myntraa",
+  // "hey myntrae",
 
-  // real word confusables
-  "hey mentor", "hey mental", "hey metric", "hey mattress", "hey metro",
-  "hey matter", "hey metal", "hey medra", "hey menorah", "hey minerva",
-  "hey mantra", "hey mantle", "hey mehta", "hey meta",
+  // // real word confusables
+  // "hey mentor", "hey mental", "hey metric", "hey mattress", "hey metro",
+  // "hey matter", "hey metal", "hey medra", "hey menorah", "hey minerva",
+  // "hey mantra", "hey mantle", "hey mehta", "hey meta",
 
-  // vowel swaps
-  "hi mentra", "hi mantra", "hi manta", "hi metro", "hi myntra", "hi mintra",
-  "hi mentro", "hi mentao", "hi mantro", "hi montro",
+  // // vowel swaps
+  // "hi mentra", "hi mantra", "hi manta", "hi metro", "hi myntra", "hi mintra",
+  // "hi mentro", "hi mentao", "hi mantro", "hi montro",
 
-  // accent-based
-  "hay mentraa", "hye mentraah", "hey mehn-tra", "hey main-tra",
-  "hey man-tra", "hey meh-tra", "hey mayn-tra", "hey min-tra",
-  "hey men-dra", "hey men-traa",
+  // // accent-based
+  // "hay mentraa", "hye mentraah", "hey mehn-tra", "hey main-tra",
+  // "hey man-tra", "hey meh-tra", "hey mayn-tra", "hey min-tra",
+  // "hey men-dra", "hey men-traa",
 
-  // esl / kid variants
-  "hey menta", "hey menthwa", "hey mentula", "hey mentwa", "hey mengra",
-  "hey mengla", "hey mencha", "hey man-cha", "hey metchra", "hey metra",
-  "hey maytra", "hey meetra",
+  // // esl / kid variants
+  // "hey menta", "hey menthwa", "hey mentula", "hey mentwa", "hey mengra",
+  // "hey mengla", "hey mencha", "hey man-cha", "hey metchra", "hey metra",
+  // "hey maytra", "hey meetra",
 
-  // additional name variants
-  "hey myntra", "he myntra", "hi myntra", "hay myntra",
-  "hey mitch", "he mitch", "hi mitch", "hay mitch",
-  "hey mitchell", "he mitchell", "hi mitchell", "hay mitchell",
-  "hey mitchel", "he mitchel", "hey mitchall", "hey michell",
+  // // additional name variants
+  // "hey myntra", "he myntra", "hi myntra", "hay myntra",
+  // "hey mitch", "he mitch", "hi mitch", "hay mitch",
+  // "hey mitchell", "he mitchell", "hi mitchell", "hay mitchell",
+  // "hey mitchel", "he mitchel", "hey mitchall", "hey michell",
 
-  // weird ones here:
-  "a mantra", "a mentra", "a mentora", "a mentara", "it mentioned",
+  // // weird ones here:
+  // "a mantra", "a mentra", "a mentora", "a mentara", "it mentioned",
 
-  // additional sound-alike words
-  "hey everyone", "he everyone", "hi everyone",
-  "hey middle", "he middle", "hi middle",
-  "hey matt", "he matt", "hi matt", "hey mat", "he mat",
-  "hey inventory", "he inventory", "hi inventory",
-  "hey man", "he man", "hi man",
-  "hey mensha", "he mensha", "hi mensha", "hey mensa", "he mensa", "hey amanda", "hey mention", "payment",
+  // // additional sound-alike words
+  // "hey everyone", "he everyone", "hi everyone",
+  // "hey middle", "he middle", "hi middle",
+  // "hey matt", "he matt", "hi matt", "hey mat", "he mat",
+  // "hey inventory", "he inventory", "hi inventory",
+  // "hey man", "he man", "hi man",
+  // "hey mensha", "he mensha", "hi mensha", "hey mensa", "he mensa", "hey amanda", "hey mention", "payment",
 ];
 
 /**

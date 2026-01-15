@@ -3,7 +3,7 @@ import {
   logger as _logger
 } from '@mentra/sdk';
 import { MiraAgent, CameraQuestionAgent } from '../agents';
-import { TranscriptProcessor } from '../utils';
+import { TranscriptProcessor, getCancellationDecider, CancellationDecider, CancellationDecision } from '../utils';
 import { ChatManager } from './chat.manager';
 import { notificationsManager } from './notifications.manager';
 import { PhotoManager } from './photo.manager';
@@ -57,6 +57,7 @@ export class TranscriptionManager {
   private wakeWordDetector: WakeWordDetector;
   private queryProcessor: QueryProcessor;
   private cameraQuestionAgent: CameraQuestionAgent;
+  private cancellationDecider: CancellationDecider;
 
   constructor(
     session: AppSession,
@@ -78,6 +79,7 @@ export class TranscriptionManager {
     this.locationService = new LocationService(sessionId);
     this.audioManager = new AudioPlaybackManager(session, sessionId);
     this.wakeWordDetector = new WakeWordDetector();
+    this.cancellationDecider = getCancellationDecider();
     this.cameraQuestionAgent = new CameraQuestionAgent(userId);
     this.queryProcessor = new QueryProcessor({
       session,
@@ -149,10 +151,10 @@ export class TranscriptionManager {
 
     if (!this.isListeningToQuery) {
       // Check for cancellation phrases before starting to listen
-      const queryAfterWakeWord = this.wakeWordDetector.removeWakeWord(text).toLowerCase().trim();
-      const isCancellation = this.wakeWordDetector.isCancellation(queryAfterWakeWord);
+      const queryAfterWakeWord = this.wakeWordDetector.removeWakeWord(text).trim();
+      const cancellationCheck = this.cancellationDecider.checkIfWantsToCancel(queryAfterWakeWord);
 
-      if (isCancellation) {
+      if (cancellationCheck === CancellationDecision.CANCEL) {
         this.logger.debug("Cancellation phrase detected, aborting query");
         this.handleCancellation();
         return;
@@ -262,9 +264,9 @@ export class TranscriptionManager {
       this.followUpTimeoutId = undefined;
     }
 
-    // Check for cancellation phrases
-    const cleanedText = this.wakeWordDetector.cleanText(text).toLowerCase().trim();
-    if (this.wakeWordDetector.isCancellation(cleanedText)) {
+    // Check for cancellation phrases using the CancellationDecider
+    const cancellationDecision = this.cancellationDecider.checkIfWantsToCancel(text);
+    if (cancellationDecision === CancellationDecision.CANCEL) {
       console.log(`🚫 [${new Date().toISOString()}] Follow-up cancelled by user`);
       this.cancelFollowUpMode();
       return;
@@ -333,9 +335,13 @@ export class TranscriptionManager {
 
   /**
    * Cancel follow-up mode and return to normal wake word detection
+   * Plays the cancellation sound to give user audio feedback
    */
   private cancelFollowUpMode(): void {
     console.log(`🚫 [${new Date().toISOString()}] Cancelling follow-up mode`);
+
+    // Play cancellation sound for audio feedback
+    this.audioManager.playCancellation();
 
     this.isInFollowUpMode = false;
     this.isProcessingQuery = false;
