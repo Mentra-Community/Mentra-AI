@@ -7,6 +7,7 @@ import {
 import { MiraAgent, CameraQuestionAgent } from '../agents';
 import { wrapText } from '../utils';
 import { getVisionQueryDecider, VisionQueryDecider, VisionDecision } from '../utils/vision-query-decider';
+import { getRecallMemoryDecider, RecallMemoryDecider, RecallDecision } from '../utils/recall-memory-decider';
 import { ChatManager } from './chat.manager';
 import { PhotoManager } from './photo.manager';
 import { AudioPlaybackManager } from './audio-playback.manager';
@@ -53,6 +54,7 @@ export class QueryProcessor {
   private wakeWordDetector: WakeWordDetector;
   private currentQueryMessageId?: string;
   private visionQueryDecider: VisionQueryDecider;
+  private recallMemoryDecider: RecallMemoryDecider;
   private onRequestClarification?: () => void;
   private pendingClarification: PendingClarification | null = null;
 
@@ -68,6 +70,7 @@ export class QueryProcessor {
     this.audioManager = config.audioManager;
     this.wakeWordDetector = config.wakeWordDetector;
     this.visionQueryDecider = getVisionQueryDecider();
+    this.recallMemoryDecider = getRecallMemoryDecider();
     this.onRequestClarification = config.onRequestClarification;
   }
 
@@ -153,8 +156,44 @@ export class QueryProcessor {
       // Show the query being processed
       this.showProcessingMessage(query);
 
-      // Get conversation history for context-aware vision detection
+      // Get conversation history for context-aware decisions
       const conversationHistory = this.miraAgent.getConversationHistoryForDecider();
+
+      // Check if this is a memory recall query (AI-powered with conversation context)
+      const recallDecision = await this.recallMemoryDecider.checkIfNeedsRecall(query, conversationHistory);
+      if (recallDecision === RecallDecision.RECALL) {
+        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 🧠 MEMORY RECALL DETECTED - Skipping vision check`);
+        stopProcessingSounds();
+
+        // Send query to frontend
+        if (this.chatManager && query.trim().length > 0 && !this.currentQueryMessageId) {
+          this.currentQueryMessageId = this.chatManager.addUserMessage(this.userId, query);
+          this.chatManager.setProcessing(this.userId, true);
+        }
+
+        // Build enhanced query with explicit conversation context for memory recall
+        const fullHistory = this.miraAgent.getFullConversationHistory();
+        let enhancedQuery = query;
+        if (fullHistory.length > 0) {
+          const contextSummary = fullHistory
+            .map((turn, idx) => `[${idx + 1}] User asked: "${turn.query}" -> You answered: "${turn.response}"`)
+            .join('\n');
+          enhancedQuery = `${query}\n\n[CONTEXT FROM PREVIOUS EXCHANGES - USE THIS DATA TO ANSWER:\n${contextSummary}]`;
+          console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📚 Injected ${fullHistory.length} conversation turns into query`);
+        }
+
+        // Route directly to MiraAgent for memory recall (no photo needed)
+        const agentResponse = await this.miraAgent.handleContext({
+          query: enhancedQuery,
+          originalQuery: query, // Pass original query for conversation history storage
+          photo: null,
+          getPhotoCallback: async () => null,
+          hasDisplay: true,
+        });
+
+        await this.handleAgentResponse(agentResponse, query, null, processQueryStartTime);
+        return;
+      }
 
       // Detect vision queries using AI decider (YES/NO/UNSURE)
       const visionDecision = await this.visionQueryDecider.checkIfNeedsCamera(query, conversationHistory);
@@ -221,6 +260,13 @@ export class QueryProcessor {
         agentResponse = await this.cameraQuestionAgent.handleContext(inputData);
         const agentEndTime = Date.now();
         console.log(`⏱️  [+${agentEndTime - processQueryStartTime}ms] ✅ CameraQuestionAgent completed (took ${agentEndTime - agentStartTime}ms)`);
+
+        // Store the conversation turn in MiraAgent so recall queries can access it
+        const responseText = agentResponse?.answer || (typeof agentResponse === 'string' ? agentResponse : '');
+        if (responseText) {
+          this.miraAgent.addExternalConversationTurn(query, responseText);
+          console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📚 Added CameraQuestionAgent response to MiraAgent conversation history`);
+        }
       } else {
         // Use MiraAgent for general queries
         console.log(`⏱️  [+${agentStartTime - processQueryStartTime}ms] 🤖 Invoking MiraAgent.handleContext...`);
@@ -402,6 +448,13 @@ export class QueryProcessor {
         agentResponse = await this.cameraQuestionAgent.handleContext(inputData);
         const agentEndTime = Date.now();
         console.log(`⏱️  [+${agentEndTime - processQueryStartTime}ms] ✅ CameraQuestionAgent completed (took ${agentEndTime - agentStartTime}ms)`);
+
+        // Store the conversation turn in MiraAgent so recall queries can access it
+        const responseText = agentResponse?.answer || (typeof agentResponse === 'string' ? agentResponse : '');
+        if (responseText) {
+          this.miraAgent.addExternalConversationTurn(originalQuery, responseText);
+          console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📚 Added CameraQuestionAgent response to MiraAgent conversation history`);
+        }
       } else {
         // User said no or no camera agent available
         console.log(`⏱️  [+${agentStartTime - processQueryStartTime}ms] 🤖 No camera needed - Routing to MiraAgent...`);

@@ -188,6 +188,7 @@ export class MiraAgent implements Agent {
       response,
       timestamp: Date.now()
     });
+    console.log(`📚 [ConversationHistory] Added turn ${this.conversationHistory.length}: "${query.substring(0, 50)}..." -> "${response.substring(0, 50)}..."`);
 
     // Clean up old conversations
     this.cleanupConversationHistory();
@@ -214,7 +215,10 @@ export class MiraAgent implements Agent {
    * Format conversation history for context in prompts
    */
   private formatConversationHistory(): string {
+    console.log(`📚 [ConversationHistory] Formatting ${this.conversationHistory.length} turns`);
+
     if (this.conversationHistory.length === 0) {
+      console.log(`📚 [ConversationHistory] No conversation history available`);
       return '';
     }
 
@@ -224,6 +228,7 @@ export class MiraAgent implements Agent {
       })
       .join('\n\n');
 
+    console.log(`📚 [ConversationHistory] Injecting history:\n${historyText.substring(0, 500)}${historyText.length > 500 ? '...' : ''}`);
     return `\nRecent conversation history:\n${historyText}\n`;
   }
 
@@ -245,6 +250,27 @@ export class MiraAgent implements Agent {
       messages.push({ role: 'assistant', content: turn.response });
     }
     return messages;
+  }
+
+  /**
+   * Get full conversation history for memory recall queries
+   * Returns a copy of the entire conversation history array
+   */
+  public getFullConversationHistory(): Array<{ query: string; response: string; timestamp: number }> {
+    return this.conversationHistory.map((turn) => ({
+      query: turn.query,
+      response: turn.response,
+      timestamp: turn.timestamp,
+    }));
+  }
+
+  /**
+   * Add a conversation turn from an external source (e.g., CameraQuestionAgent)
+   * This ensures conversation history is maintained across different agents
+   */
+  public addExternalConversationTurn(query: string, response: string): void {
+    console.log(`📚 [ConversationHistory] Adding external turn from another agent`);
+    this.addToConversationHistory(query, response);
   }
 
   /**
@@ -752,6 +778,8 @@ Answer with ONLY "YES" if it's a follow-up question that needs context from the 
       const transcriptHistory = userContext.transcript_history || "";
       const insightHistory = userContext.insight_history || "";
       let query = userContext.query || "";
+      // originalQuery is used for conversation history - stores the clean query without injected context
+      const originalQuery = userContext.originalQuery || query;
       let photo = userContext.photo as PhotoData | null;
       const getPhotoCallback = userContext.getPhotoCallback as (() => Promise<PhotoData | null>) | undefined;
 
@@ -883,13 +911,13 @@ Answer with ONLY "YES" if it's a follow-up question that needs context from the 
           console.log(`${"=".repeat(60)}\n`);
 
           const finalResponse = imageAnalysisResult || textResult.answer;
-          // Save to conversation history
-          this.addToConversationHistory(query, finalResponse);
+          // Save to conversation history (use originalQuery to avoid storing injected context)
+          this.addToConversationHistory(originalQuery, finalResponse);
           return { answer: finalResponse, needsCamera: true };
         } catch (error) {
           console.error('Error in image analysis:', error);
           // Fall back to text answer if image analysis fails
-          this.addToConversationHistory(query, textResult.answer);
+          this.addToConversationHistory(originalQuery, textResult.answer);
           return { answer: textResult.answer, needsCamera: textResult.needsCamera };
         }
       }
@@ -901,8 +929,8 @@ Answer with ONLY "YES" if it's a follow-up question that needs context from the 
       console.log(`⏱️  Total processing time: ${(totalDuration / 1000).toFixed(2)}s`);
       console.log(`${"=".repeat(60)}\n`);
 
-      // Save to conversation history
-      this.addToConversationHistory(query, textResult.answer);
+      // Save to conversation history (use originalQuery to avoid storing injected context)
+      this.addToConversationHistory(originalQuery, textResult.answer);
       return { answer: textResult.answer, needsCamera: textResult.needsCamera };
     } catch (err) {
       const errorTime = Date.now();

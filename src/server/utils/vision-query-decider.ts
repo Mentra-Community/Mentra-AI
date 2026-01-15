@@ -39,8 +39,11 @@ DEFINITELY DOES NOT REQUIRE CAMERA (respond "NO"):
 - Follow-up questions that clearly reference previous conversation topics (see conversation context below)
 
 AMBIGUOUS - COULD GO EITHER WAY (respond "UNSURE"):
-- Vague questions that MIGHT refer to something visible: "what am I working on"
-- "where am I" - could want GPS location OR want to identify visible surroundings
+- "what am I working on" - could refer to visible task OR abstract question = UNSURE
+- "what am I working on right now" - needs camera to see what's in front of them = UNSURE
+- "where am I" - could want GPS location OR want to identify visible surroundings = UNSURE
+- "what's in front of me" - definitely needs camera = YES
+- When the query could reasonably be about something physical in the user's environment = UNSURE
 - ONLY use UNSURE when truly ambiguous - when in doubt and query mentions "this"/"that", prefer YES
 
 IMPORTANT: If query asks about price, name, type, brand, identification of "this" or "that" - respond YES, not UNSURE
@@ -95,12 +98,47 @@ export class VisionQueryDecider {
   }
 
   /**
+   * Fast pre-check for obvious vision patterns before calling LLM
+   * Returns YES for clear vision queries, UNSURE for ambiguous, null to continue to LLM
+   */
+  private fastVisionCheck(query: string): VisionDecision | null {
+    const queryLower = query.toLowerCase();
+
+    // Clear vision patterns - "what is this", "what kind of X is this"
+    if (/what\s+(is|kind|type|sort|brand|color|price)\b.*\bthis\b/i.test(queryLower) ||
+        /\bthis\b.*what\s+(is|kind|type|sort|brand|color|price)/i.test(queryLower)) {
+      console.log(`🤖 VisionQueryDecider: "${query}" -> YES (fast check: what X is this)`);
+      return VisionDecision.YES;
+    }
+
+    // "read this", "look at this", "see this"
+    if (/\b(read|look at|see|identify|translate)\s+(this|that)\b/i.test(queryLower)) {
+      console.log(`🤖 VisionQueryDecider: "${query}" -> YES (fast check: action + this/that)`);
+      return VisionDecision.YES;
+    }
+
+    // Ambiguous patterns - "what am I working on", "what am I looking at"
+    if (/what am i (working|looking|doing|seeing)\b/i.test(queryLower)) {
+      console.log(`🤖 VisionQueryDecider: "${query}" -> UNSURE (fast check: what am I X)`);
+      return VisionDecision.UNSURE;
+    }
+
+    return null; // Continue to LLM check
+  }
+
+  /**
    * Determine if a query requires camera/vision
    * Returns YES, NO, or UNSURE
    * @param query - The user's query
    * @param conversationHistory - Optional recent conversation for context
    */
   async checkIfNeedsCamera(query: string, conversationHistory?: ConversationMessage[]): Promise<VisionDecision> {
+    // Fast pre-check for obvious vision patterns (saves LLM call)
+    const fastResult = this.fastVisionCheck(query);
+    if (fastResult !== null) {
+      return fastResult;
+    }
+
     try {
       const contextString = this.formatConversationContext(conversationHistory);
       const prompt = VISION_DECISION_PROMPT
@@ -157,6 +195,12 @@ export class VisionQueryDecider {
       if (queryLower.includes(phrase)) {
         return VisionDecision.YES;
       }
+    }
+
+    // "what is this", "what kind of X is this", "what type is this" patterns - always vision
+    if (/what\s+(is|kind|type|sort|brand|color|price)\b.*\bthis\b/i.test(queryLower) ||
+        /\bthis\b.*what\s+(is|kind|type|sort|brand|color|price)/i.test(queryLower)) {
+      return VisionDecision.YES;
     }
 
     // Check for demonstrative pronouns with vision action words
