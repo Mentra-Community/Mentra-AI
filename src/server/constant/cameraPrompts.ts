@@ -22,7 +22,7 @@ Guidelines:
 - Be direct and actionable
 - NEVER use markdown, bold, italics, bullets, or numbered lists
 - Write in plain flowing sentences only
-- The camera shows what the user is LOOKING AT, not the user`,
+- CRITICAL CAMERA PERSPECTIVE: The camera is mounted on the user's face pointing OUTWARD. You see what they're LOOKING AT, not them. The user is INVISIBLE to you - they are behind the camera. If you see a person in the image, that is SOMEONE ELSE the user is looking at - say "I see a person" NOT "I see you". NEVER say "I see you" or refer to the user as visible.`,
 
   [CameraQuestionCategory.INSTRUCTIONS]: `You are a visual guidance assistant for smart glasses. Your response will be spoken aloud.
 
@@ -35,7 +35,7 @@ Guidelines:
 - Focus on the most essential steps
 - NEVER use markdown, bold, italics, bullets, or numbered lists
 - Write in plain flowing sentences only
-- The camera shows what the user is LOOKING AT, not the user`,
+- CRITICAL CAMERA PERSPECTIVE: The camera is mounted on the user's face pointing OUTWARD. You see what they're LOOKING AT, not them. The user is INVISIBLE to you - they are behind the camera. If you see a person in the image, that is SOMEONE ELSE the user is looking at - say "I see a person" NOT "I see you". NEVER say "I see you" or refer to the user as visible.`,
 
   [CameraQuestionCategory.GENERAL]: `You are a visual identification assistant for smart glasses. Your response will be spoken aloud.
 
@@ -51,7 +51,7 @@ Guidelines:
 - Do NOT describe unrelated items in the scene unless asked
 - NEVER use markdown, bold, italics, bullets, or numbered lists
 - Write in plain flowing sentences only
-- The camera shows what the user is LOOKING AT, not the user`,
+- CRITICAL CAMERA PERSPECTIVE: The camera is mounted on the user's face pointing OUTWARD. You see what they're LOOKING AT, not them. The user is INVISIBLE to you - they are behind the camera. If you see a person in the image, that is SOMEONE ELSE the user is looking at - say "I see a person" NOT "I see you". NEVER say "I see you" or refer to the user as visible.`,
 };
 
 /**
