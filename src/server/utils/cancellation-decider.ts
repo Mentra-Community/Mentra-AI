@@ -61,6 +61,15 @@ const nonCancellationPatterns = [
   /stop playing/i,                          // "stop playing music"
   /ignore (the|my|this|that) (error|warning|notification)/i,
   /never mind (the|my|this|that)/i,        // "never mind the details" - asking to skip something specific
+
+  // Affirmative acknowledgment phrases - natural responses that should NOT cancel
+  // These are common after Mira provides information, especially in follow-up mode
+  /^(ok|okay|alright|thanks|thank you|thanx|thx|ty)$/i,
+  /^(ok|okay|alright)\s+(thanks|thank you|thanx|thx|ty)$/i,
+  /^(thank you|thanks|thanx|thx)\s+(so much|very much)$/i,
+  /^sounds (good|great|perfect|nice)$/i,
+  /^(got it|understood|i understand|makes sense|that works|perfect)$/i,
+  /^(yes|yeah|yep|yup|sure|of course|absolutely)\s+(thank you|thanks|thanx|thx)$/i,
 ];
 
 export class CancellationDecider {
@@ -84,6 +93,47 @@ export class CancellationDecider {
         return true;
       }
     }
+    return false;
+  }
+
+  /**
+   * Check if text is an affirmative/acknowledgment phrase
+   * These should never be treated as cancellation
+   */
+  public isAffirmativePhrase(text: string): boolean {
+    const cleanedText = this.cleanText(text);
+
+    // Exact match phrases (must be the entire transcription)
+    const exactMatchPhrases = [
+      'ok', 'okay', 'alright', 'thanks', 'thank you', 'thanx', 'thx', 'ty',
+      'got it', 'understood', 'perfect',
+    ];
+
+    // Phrases that can appear at the start or anywhere in the text
+    const flexiblePhrases = [
+      'ok thanks', 'ok thank you', 'okay thanks', 'okay thank you',
+      'alright thanks', 'alright thank you',
+      'thank you so much', 'thanks so much', 'thank you very much', 'thanks very much',
+      'sounds good', 'sounds great', 'sounds perfect', 'sounds nice',
+      'i understand', 'makes sense', 'that works',
+      'yes thank you', 'yeah thanks', 'yep thanks', 'sure thanks',
+      'yes thanks', 'yeah thank you', 'sure thank you',
+    ];
+
+    // Check exact matches first
+    for (const phrase of exactMatchPhrases) {
+      if (cleanedText === phrase) {
+        return true;
+      }
+    }
+
+    // Check flexible matches (can be at start or contained)
+    for (const phrase of flexiblePhrases) {
+      if (cleanedText.includes(phrase)) {
+        return true;
+      }
+    }
+
     return false;
   }
 
@@ -153,7 +203,13 @@ export class CancellationDecider {
    * @returns CancellationDecision.CANCEL or CancellationDecision.CONTINUE
    */
   checkIfWantsToCancel(query: string): CancellationDecision {
-    // First check if this is a legitimate query that contains cancel words
+    // First check if this is an affirmative phrase (highest priority)
+    if (this.isAffirmativePhrase(query)) {
+      console.log(`✅ CancellationDecider: "${query}" -> CONTINUE (affirmative phrase)`);
+      return CancellationDecision.CONTINUE;
+    }
+
+    // Check if this is a legitimate query that contains cancel words
     if (this.isNonCancellationQuery(query)) {
       console.log(`🚫 CancellationDecider: "${query}" -> CONTINUE (non-cancellation pattern)`);
       return CancellationDecision.CONTINUE;
@@ -188,6 +244,36 @@ export class CancellationDecider {
     }
 
     return false;
+  }
+
+  /**
+   * Context-aware cancellation check for follow-up mode
+   * More lenient than checkIfWantsToCancel - only detects obvious cancellations
+   * Use this in follow-up mode to avoid false positives from affirmative responses
+   */
+  checkIfWantsToCancelInFollowUpMode(query: string): CancellationDecision {
+    // Affirmative phrases are ALWAYS safe in follow-up mode
+    if (this.isAffirmativePhrase(query)) {
+      console.log(`✅ CancellationDecider (follow-up): "${query}" -> CONTINUE (affirmative)`);
+      return CancellationDecision.CONTINUE;
+    }
+
+    // Non-cancellation queries are safe
+    if (this.isNonCancellationQuery(query)) {
+      console.log(`🚫 CancellationDecider (follow-up): "${query}" -> CONTINUE (non-cancellation)`);
+      return CancellationDecision.CONTINUE;
+    }
+
+    // In follow-up mode, only flag OBVIOUS cancellations (no fuzzy matching)
+    // This prevents false positives from natural responses
+    if (this.isObviousCancellation(query)) {
+      console.log(`🚫 CancellationDecider (follow-up): "${query}" -> CANCEL (obvious)`);
+      return CancellationDecision.CANCEL;
+    }
+
+    // Default to CONTINUE in follow-up mode (more lenient)
+    console.log(`🚫 CancellationDecider (follow-up): "${query}" -> CONTINUE (default)`);
+    return CancellationDecision.CONTINUE;
   }
 }
 

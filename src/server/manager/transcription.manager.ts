@@ -264,8 +264,15 @@ export class TranscriptionManager {
       this.followUpTimeoutId = undefined;
     }
 
-    // Check for cancellation phrases using the CancellationDecider
-    const cancellationDecision = this.cancellationDecider.checkIfWantsToCancel(text);
+    // Check if user said an affirmative phrase (acknowledgment to end conversation)
+    if (this.cancellationDecider.isAffirmativePhrase(text)) {
+      console.log(`✅ [${new Date().toISOString()}] Affirmative phrase detected - ending follow-up mode gracefully`);
+      this.endFollowUpModeGracefully();
+      return;
+    }
+
+    // Check for cancellation using context-aware decider for follow-up mode
+    const cancellationDecision = this.cancellationDecider.checkIfWantsToCancelInFollowUpMode(text);
     if (cancellationDecision === CancellationDecision.CANCEL) {
       console.log(`🚫 [${new Date().toISOString()}] Follow-up cancelled by user`);
       this.cancelFollowUpMode();
@@ -341,6 +348,35 @@ export class TranscriptionManager {
     console.log(`🚫 [${new Date().toISOString()}] Cancelling follow-up mode`);
 
     // Play cancellation sound for audio feedback
+    this.audioManager.playCancellation();
+
+    this.isInFollowUpMode = false;
+    this.isProcessingQuery = false;
+
+    if (this.followUpTimeoutId) {
+      clearTimeout(this.followUpTimeoutId);
+      this.followUpTimeoutId = undefined;
+    }
+    if (this.timeoutId) {
+      clearTimeout(this.timeoutId);
+      this.timeoutId = undefined;
+    }
+
+    this.transcriptionStartTime = 0;
+    this.transcriptProcessor.clear();
+    this.photoManager.clearPhoto();
+
+    console.log(`🔓 [${new Date().toISOString()}] Back to normal mode - waiting for wake word`);
+  }
+
+  /**
+   * End follow-up mode gracefully (user said affirmative phrase like "thank you")
+   * Plays cancellation sound to acknowledge the end of conversation
+   */
+  private endFollowUpModeGracefully(): void {
+    console.log(`👋 [${new Date().toISOString()}] Ending follow-up mode gracefully (affirmative acknowledgment)`);
+
+    // Play cancellation sound to acknowledge conversation end
     this.audioManager.playCancellation();
 
     this.isInFollowUpMode = false;
