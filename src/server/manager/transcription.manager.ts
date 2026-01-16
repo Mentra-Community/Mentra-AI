@@ -664,9 +664,15 @@ export class TranscriptionManager {
     }
 
     this.isProcessingQuery = true;
+    let shouldEnterFollowUp = true; // Track if we should enter follow-up mode
 
     try {
-      await this.queryProcessor.processQuery(rawText, timerDuration, this.transcriptionStartTime);
+      const result = await this.queryProcessor.processQuery(rawText, timerDuration, this.transcriptionStartTime);
+      // If processQuery returns false, it means the query was cancelled or was an affirmative phrase
+      // and we should NOT enter follow-up mode
+      if (result === false) {
+        shouldEnterFollowUp = false;
+      }
     } catch (error) {
       logger.error(error, `[Session ${this.sessionId}]: Error in processQuery:`);
     } finally {
@@ -697,14 +703,18 @@ export class TranscriptionManager {
         this.maxListeningTimeoutId = undefined;
       }
 
-      // Start follow-up listening mode if enabled
-      // This plays the follow-up sound and waits 5 seconds for user response
-      if (this.followUpEnabled) {
+      // Start follow-up listening mode ONLY if query was actually processed
+      // Skip follow-up for cancellations and affirmative phrases
+      if (this.followUpEnabled && shouldEnterFollowUp) {
         await this.startFollowUpListening();
       } else {
-        // Release processing lock immediately if follow-up is disabled
+        // Release processing lock immediately if follow-up is disabled or query was cancelled
         this.isProcessingQuery = false;
-        console.log(`🔓 [${new Date().toISOString()}] Processing lock released - ready for next query`);
+        if (!shouldEnterFollowUp) {
+          console.log(`🔓 [${new Date().toISOString()}] Skipping follow-up mode (query was cancelled or affirmative)`);
+        } else {
+          console.log(`🔓 [${new Date().toISOString()}] Processing lock released - ready for next query`);
+        }
       }
     }
   }

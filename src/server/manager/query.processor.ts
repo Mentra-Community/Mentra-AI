@@ -5,7 +5,7 @@ import {
   logger as _logger
 } from '@mentra/sdk';
 import { MiraAgent, CameraQuestionAgent } from '../agents';
-import { wrapText } from '../utils';
+import { wrapText, getCancellationDecider } from '../utils';
 import { getVisionQueryDecider, VisionQueryDecider, VisionDecision } from '../utils/vision-query-decider';
 import { getRecallMemoryDecider, RecallMemoryDecider, RecallDecision } from '../utils/recall-memory-decider';
 import { ChatManager } from './chat.manager';
@@ -77,7 +77,7 @@ export class QueryProcessor {
   /**
    * Process and respond to the user's query
    */
-  async processQuery(rawText: string, timerDuration: number, transcriptionStartTime: number): Promise<void> {
+  async processQuery(rawText: string, timerDuration: number, transcriptionStartTime: number): Promise<boolean> {
     const processQueryStartTime = Date.now();
     console.log(`\n${"█".repeat(70)}`);
     console.log(`⏱️  [TIMESTAMP] 🚀 processQuery START: ${new Date().toISOString()}`);
@@ -99,7 +99,7 @@ export class QueryProcessor {
     // Fetch transcript from backend
     const transcriptionResponse = await this.fetchTranscript(durationSeconds, processQueryStartTime, transcriptionStartTime);
     if (!transcriptionResponse) {
-      return;
+      return false;
     }
 
     // Get the transcript text - use only the LAST segment (final or interim)
@@ -125,12 +125,23 @@ export class QueryProcessor {
       logger.warn(`Failed to clear transcripts: ${err.message}`);
     });
 
+    // Check if query is just an affirmative phrase (e.g., "Hey Mentra, thank you")
+    const cancellationDecider = getCancellationDecider();
+    const isAffirmative = cancellationDecider.isAffirmativePhrase(query);
+
+    if (isAffirmative) {
+      console.log(`✅ [${new Date().toISOString()}] Initial query is affirmative phrase - not processing`);
+      // Play a simple acknowledgment instead of entering follow-up mode
+      await this.audioManager.showOrSpeakText("You're welcome!");
+      return false; // Don't enter follow-up mode for affirmative phrases
+    }
+
     // Check if query is a cancellation phrase (safety net)
     if (this.wakeWordDetector.isCancellation(query)) {
       logger.debug("Cancellation detected in processQuery");
       await this.audioManager.playCancellation();
       this.session.layouts.showTextWall("Cancelled", { durationMs: 2000 });
-      return;
+      return false; // Don't enter follow-up mode for cancellation phrases
     }
 
     if (query.trim().length === 0) {
@@ -138,13 +149,13 @@ export class QueryProcessor {
         wrapText("No query provided.", 30),
         { durationMs: 5000 }
       );
-      return;
+      return false;
     }
 
     // Check if this is a clarification response to a pending query
     if (this.pendingClarification) {
       await this.handleClarificationResponse(query);
-      return;
+      return true; // Clarification responses should allow follow-up mode
     }
 
     // Play processing sounds
@@ -220,7 +231,7 @@ export class QueryProcessor {
           stopProcessingSounds();
           await this.handleAgentResponse(agentResponse, query, photo, processQueryStartTime);
         }
-        return;
+        return true; // Vision retry completed successfully
       }
 
       if (recallDecision === RecallDecision.RECALL) {
@@ -254,7 +265,7 @@ export class QueryProcessor {
         });
 
         await this.handleAgentResponse(agentResponse, query, null, processQueryStartTime);
-        return;
+        return true; // Memory recall completed successfully
       }
 
       // Detect vision queries using AI decider (YES/NO/UNSURE)
@@ -281,7 +292,7 @@ export class QueryProcessor {
 
         // Trigger new listening session
         this.onRequestClarification();
-        return;
+        return true; // Clarification requested - still allow follow-up
       }
 
       const isVisionQuery = visionDecision === VisionDecision.YES;
@@ -349,11 +360,14 @@ export class QueryProcessor {
       console.log(`⏱️  Total time from start to finish: ${(totalProcessTime / 1000).toFixed(2)}s (${totalProcessTime}ms)`);
       console.log(`${"█".repeat(70)}\n`);
 
+      return true; // Query processed successfully - allow follow-up mode
+
     } catch (error) {
       console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ❌ Error in processQuery`);
       logger.error(error, `[Session ${this.sessionId}]: Error processing query:`);
       await this.audioManager.showOrSpeakText("Sorry, there was an error processing your request.");
       stopProcessingSounds();
+      return false; // Error occurred - don't enter follow-up mode
     }
   }
 
