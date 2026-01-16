@@ -3,7 +3,7 @@ import {
   logger as _logger
 } from '@mentra/sdk';
 import { MiraAgent, CameraQuestionAgent } from '../agents';
-import { TranscriptProcessor, getCancellationDecider, CancellationDecider, CancellationDecision } from '../utils';
+import { TranscriptProcessor, getCancellationDecider, CancellationDecider, CancellationDecision, CancellationResult } from '../utils';
 import { ChatManager } from './chat.manager';
 import { notificationsManager } from './notifications.manager';
 import { PhotoManager } from './photo.manager';
@@ -49,6 +49,7 @@ export class TranscriptionManager {
   // Follow-up listening mode - listens for 5 seconds without wake word after query completes
   private isInFollowUpMode: boolean = false;
   private followUpTimeoutId?: NodeJS.Timeout;
+  private isEndingFollowUpGracefully: boolean = false; // Guard to prevent double execution
 
   // Extracted managers and services
   private photoManager: PhotoManager;
@@ -106,7 +107,7 @@ export class TranscriptionManager {
   /**
    * Process incoming transcription data
    */
-  handleTranscription(transcriptionData: any): void {
+  async handleTranscription(transcriptionData: any): Promise<void> {
     console.log(`🎤 [${new Date().toISOString()}] Transcription received: "${transcriptionData.text}" (isFinal: ${transcriptionData.isFinal}, followUpMode: ${this.isInFollowUpMode})`);
 
     // Broadcast transcription to SSE clients
@@ -123,7 +124,7 @@ export class TranscriptionManager {
 
     // Handle follow-up mode: no wake word required, just process the transcription
     if (this.isInFollowUpMode) {
-      this.handleFollowUpTranscription(transcriptionData);
+      await this.handleFollowUpTranscription(transcriptionData);
       return;
     }
 
@@ -254,7 +255,7 @@ export class TranscriptionManager {
    * Handle transcription in follow-up mode (no wake word required)
    * User has 5 seconds to speak after the follow-up sound plays
    */
-  private handleFollowUpTranscription(transcriptionData: any): void {
+  private async handleFollowUpTranscription(transcriptionData: any): Promise<void> {
     const text = transcriptionData.text;
     console.log(`🔄 [${new Date().toISOString()}] Follow-up transcription: "${text}" (isFinal: ${transcriptionData.isFinal})`);
 
@@ -264,16 +265,30 @@ export class TranscriptionManager {
       this.followUpTimeoutId = undefined;
     }
 
-    // Check if user said an affirmative phrase (acknowledgment to end conversation)
-    if (this.cancellationDecider.isAffirmativePhrase(text)) {
+    // Check for cancellation using AI-powered context-aware decider for follow-up mode
+    // This checks both affirmative phrases and cancellation phrases
+    const result = await this.cancellationDecider.checkIfWantsToCancelInFollowUpMode(text);
+
+    // Handle affirmative phrases (user wants to end conversation gracefully)
+    // IMPORTANT: Only end gracefully if NOT in clarification mode
+    // In clarification mode, "sure"/"yes" means "continue with task", not "end conversation"
+    if (result.isAffirmative && !this.isListeningToQuery) {
       console.log(`✅ [${new Date().toISOString()}] Affirmative phrase detected - ending follow-up mode gracefully`);
-      this.endFollowUpModeGracefully();
+
+      // Cancel any pending query processing timeout
+      if (this.timeoutId) {
+        clearTimeout(this.timeoutId);
+        this.timeoutId = undefined;
+      }
+
+      // Use void to explicitly acknowledge we're not awaiting this async call
+      // The guard inside endFollowUpModeGracefully prevents concurrent executions
+      void this.endFollowUpModeGracefully();
       return;
     }
 
-    // Check for cancellation using context-aware decider for follow-up mode
-    const cancellationDecision = this.cancellationDecider.checkIfWantsToCancelInFollowUpMode(text);
-    if (cancellationDecision === CancellationDecision.CANCEL) {
+    // Handle cancellation commands (user wants to stop immediately)
+    if (result.decision === CancellationDecision.CANCEL) {
       console.log(`🚫 [${new Date().toISOString()}] Follow-up cancelled by user`);
       this.cancelFollowUpMode();
       return;
@@ -373,15 +388,22 @@ export class TranscriptionManager {
    * End follow-up mode gracefully (user said affirmative phrase like "thank you")
    * Plays cancellation sound to acknowledge the end of conversation
    */
-  private endFollowUpModeGracefully(): void {
+  private async endFollowUpModeGracefully(): Promise<void> {
+    // Guard against double execution (interim + final transcriptions)
+    if (this.isEndingFollowUpGracefully) {
+      console.log(`⏭️  [${new Date().toISOString()}] Already ending follow-up gracefully, skipping duplicate call`);
+      return;
+    }
+
+    this.isEndingFollowUpGracefully = true;
     console.log(`👋 [${new Date().toISOString()}] Ending follow-up mode gracefully (affirmative acknowledgment)`);
 
-    // Play cancellation sound to acknowledge conversation end
-    this.audioManager.playCancellation();
-
+    // CRITICAL: Exit follow-up mode IMMEDIATELY (synchronously) before async audio
+    // This prevents accepting transcriptions without wake word while audio is playing
     this.isInFollowUpMode = false;
     this.isProcessingQuery = false;
 
+    // Clear all timeouts immediately
     if (this.followUpTimeoutId) {
       clearTimeout(this.followUpTimeoutId);
       this.followUpTimeoutId = undefined;
@@ -391,11 +413,29 @@ export class TranscriptionManager {
       this.timeoutId = undefined;
     }
 
+    // Clear transcription state immediately
     this.transcriptionStartTime = 0;
     this.transcriptProcessor.clear();
     this.photoManager.clearPhoto();
 
-    console.log(`🔓 [${new Date().toISOString()}] Back to normal mode - waiting for wake word`);
+    console.log(`🔓 [${new Date().toISOString()}] Exited follow-up mode - back to normal mode (audio acknowledgment will play)`);
+
+    try {
+      // Send a friendly acknowledgment message (async, but state is already reset)
+      const acknowledgmentMessage = "I'm always here to help, just let me know.";
+
+      // Display on glasses and speak the message
+      await this.audioManager.showOrSpeakText(acknowledgmentMessage);
+
+      // Play cancellation sound to acknowledge conversation end
+      this.audioManager.playCancellation();
+    } catch (error) {
+      console.error(`❌ Error in endFollowUpModeGracefully:`, error);
+    } finally {
+      // Reset guard flag
+      this.isEndingFollowUpGracefully = false;
+      console.log(`✅ [${new Date().toISOString()}] Graceful exit complete`);
+    }
   }
 
   /**

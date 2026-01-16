@@ -2,9 +2,10 @@
  * Cancellation Decider
  * Determines if the user wants to cancel their current prompt/query
  * Uses fast keyword matching with fuzzy detection for noisy transcriptions
+ * Plus AI-powered affirmative phrase detection for better accuracy
  */
 
-import { cancellationPhrases } from '../constant/wakeWords';
+import { LLMProvider } from '../manager/llm.manager';
 
 export enum CancellationDecision {
   CANCEL = 'cancel',     // User wants to cancel
@@ -12,42 +13,13 @@ export enum CancellationDecision {
 }
 
 /**
- * Extended cancellation phrases for more comprehensive detection
- * Includes variations and phonetic mishears
+ * Result from cancellation check with additional context
  */
-const extendedCancellationPhrases = [
-  // Original phrases from wakeWords.ts
-  ...cancellationPhrases,
+export interface CancellationResult {
+  decision: CancellationDecision;
+  isAffirmative: boolean; // True if the phrase was detected as an affirmative acknowledgment
+}
 
-  // Additional explicit cancel phrases
-  'stop it', 'stop that', 'stop stop', 'stop please',
-  'cancel that', 'cancel it', 'cancel please',
-  'forget it', 'forget that', 'forget about it',
-  'skip it', 'skip that', 'skip this',
-  'abort', 'abort that', 'abort it',
-  'quit', 'quit it', 'quit that',
-  'no no no', 'no no', 'nope', 'no wait',
-  'hold on', 'wait wait', 'wait stop',
-  'shut up', 'be quiet', 'quiet',
-  'enough', 'that\'s enough', 'thats enough',
-  'stop listening', 'stop talking',
-  'i changed my mind', 'changed my mind',
-  'actually no', 'actually never mind', 'actually nevermind',
-  'scratch that', 'take that back',
-  'oops', 'whoops', 'my bad', 'sorry no',
-  'wrong', 'that\'s wrong', 'thats wrong',
-  'not what i wanted', 'not what i meant',
-  'i didn\'t mean that', 'i didnt mean that',
-  'don\'t do that', 'dont do that',
-  'please stop', 'just stop',
-
-  // Phonetic variations / mishears
-  'never mine', 'never mined', 'ever mind',
-  'cancle', 'cancell', 'councell',
-  'stopp', 'stahp', 'staph',
-  'ignore it', 'ignore this',
-  'dismiss', 'dismiss that', 'dismissed',
-];
 
 /**
  * Phrases that should NOT be considered cancellation even if they contain cancel words
@@ -103,6 +75,20 @@ export class CancellationDecider {
   public isAffirmativePhrase(text: string): boolean {
     const cleanedText = this.cleanText(text);
 
+    // CRITICAL: Check for negation words that invalidate affirmative phrases
+    // "no thank you", "nah thanks", etc. are NOT affirmative
+    const negationPatterns = [
+      /^(no|nope|nah|naw)\s+(thank|thanks|thank you|thanx|thx)/i,
+      /^(uh|um|uhh|umm)?\s*(no|nope|nah|naw)\s+(thank|thanks|thank you|thanx|thx)/i,
+    ];
+
+    for (const pattern of negationPatterns) {
+      if (pattern.test(cleanedText)) {
+        console.log(`❌ isAffirmativePhrase: "${text}" contains negation - NOT affirmative`);
+        return false;
+      }
+    }
+
     // Exact match phrases (must be the entire transcription)
     const exactMatchPhrases = [
       'ok', 'okay', 'alright', 'thanks', 'thank you', 'thanx', 'thx', 'ty',
@@ -138,69 +124,60 @@ export class CancellationDecider {
   }
 
   /**
-   * Calculate similarity between two strings (simple Levenshtein-based)
-   * Returns value between 0 and 1
+   * AI-powered affirmative phrase detection
+   * Uses LLM to determine if a phrase is a conversational acknowledgment
+   * that indicates the user wants to END the conversation
    */
-  private similarity(s1: string, s2: string): number {
-    const longer = s1.length > s2.length ? s1 : s2;
-    const shorter = s1.length > s2.length ? s2 : s1;
+  public async isAffirmativePhraseAI(text: string): Promise<boolean> {
+    try {
+      const llm = LLMProvider.getLLM(50);
 
-    if (longer.length === 0) return 1.0;
+      const prompt = `Analyze if this user phrase is a conversational acknowledgment/affirmative response (like "thank you", "okay", "got it") that indicates they want to END the conversation.
 
-    const costs: number[] = [];
-    for (let i = 0; i <= shorter.length; i++) {
-      let lastValue = i;
-      for (let j = 0; j <= longer.length; j++) {
-        if (i === 0) {
-          costs[j] = j;
-        } else if (j > 0) {
-          let newValue = costs[j - 1];
-          if (shorter[i - 1] !== longer[j - 1]) {
-            newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1;
-          }
-          costs[j - 1] = lastValue;
-          lastValue = newValue;
-        }
-      }
-      if (i > 0) costs[longer.length] = lastValue;
+User phrase: "${text}"
+
+Return ONLY "yes" or "no".
+
+Examples:
+- "thank you" → yes
+- "okay" → yes
+- "got it" → yes
+- "sounds good" → yes
+- "perfect" → yes
+- "no thank you" → no (polite decline, not acknowledgment)
+- "uh no thanks" → no (decline)
+- "nah thanks" → no (decline)
+- "not really" → no (decline)
+- "what time is it" → no (new query)
+- "how do I cancel" → no (new query)
+- "cancel that" → no (cancellation command)
+- "stop" → no (cancellation command)
+
+Answer:`;
+
+      const response = await llm.invoke(prompt);
+      const answer = response.content.toString().toLowerCase().trim();
+
+      const isAffirmative = answer === 'yes';
+      console.log(`🤖 AI affirmative detection: "${text}" → ${isAffirmative ? 'YES' : 'NO'} (raw: "${answer}")`);
+
+      return isAffirmative;
+    } catch (error) {
+      console.error(`❌ AI affirmative detection failed, falling back to regex:`, error);
+      // Fallback to regex-based detection
+      return this.isAffirmativePhrase(text);
     }
-
-    return (longer.length - costs[longer.length]) / longer.length;
   }
 
-  /**
-   * Check if the text contains a cancellation phrase with fuzzy matching
-   */
-  private hasCancellationPhrase(text: string): boolean {
-    const cleanedText = this.cleanText(text);
 
-    // Exact match first
-    for (const phrase of extendedCancellationPhrases) {
-      const cleanedPhrase = this.cleanText(phrase);
-      if (cleanedText.includes(cleanedPhrase)) {
-        return true;
-      }
-    }
-
-    // Fuzzy match for short phrases (to catch transcription errors)
-    // Only do fuzzy matching if the text is short (likely just a cancellation phrase)
-    if (cleanedText.split(' ').length <= 4) {
-      for (const phrase of extendedCancellationPhrases) {
-        const cleanedPhrase = this.cleanText(phrase);
-        // Check if the entire text is similar to a cancellation phrase
-        if (this.similarity(cleanedText, cleanedPhrase) > 0.8) {
-          return true;
-        }
-      }
-    }
-
-    return false;
-  }
 
   /**
    * Determine if the user wants to cancel their query
    * @param query - The user's transcription
    * @returns CancellationDecision.CANCEL or CancellationDecision.CONTINUE
+   *
+   * Note: This is the synchronous version for wake-word mode.
+   * For better accuracy in follow-up mode, use checkIfWantsToCancelInFollowUpMode()
    */
   checkIfWantsToCancel(query: string): CancellationDecision {
     // First check if this is an affirmative phrase (highest priority)
@@ -215,9 +192,10 @@ export class CancellationDecider {
       return CancellationDecision.CONTINUE;
     }
 
-    // Check for cancellation phrases
-    if (this.hasCancellationPhrase(query)) {
-      console.log(`🚫 CancellationDecider: "${query}" -> CANCEL`);
+    // Check for OBVIOUS cancellation phrases only
+    // We use a stricter check to avoid false positives with words like "sure", "ok", etc.
+    if (this.isObviousCancellation(query)) {
+      console.log(`🚫 CancellationDecider: "${query}" -> CANCEL (obvious)`);
       return CancellationDecision.CANCEL;
     }
 
@@ -250,30 +228,45 @@ export class CancellationDecider {
    * Context-aware cancellation check for follow-up mode
    * More lenient than checkIfWantsToCancel - only detects obvious cancellations
    * Use this in follow-up mode to avoid false positives from affirmative responses
+   * Uses AI-powered affirmative phrase detection for better accuracy
+   * Returns both the decision and whether it was an affirmative phrase
    */
-  checkIfWantsToCancelInFollowUpMode(query: string): CancellationDecision {
-    // Affirmative phrases are ALWAYS safe in follow-up mode
-    if (this.isAffirmativePhrase(query)) {
-      console.log(`✅ CancellationDecider (follow-up): "${query}" -> CONTINUE (affirmative)`);
-      return CancellationDecision.CONTINUE;
+  async checkIfWantsToCancelInFollowUpMode(query: string): Promise<CancellationResult> {
+    // Use AI-powered affirmative detection in follow-up mode
+    const isAffirmative = await this.isAffirmativePhraseAI(query);
+    if (isAffirmative) {
+      console.log(`✅ CancellationDecider (follow-up): "${query}" -> CONTINUE (AI detected affirmative)`);
+      return {
+        decision: CancellationDecision.CONTINUE,
+        isAffirmative: true,
+      };
     }
 
     // Non-cancellation queries are safe
     if (this.isNonCancellationQuery(query)) {
       console.log(`🚫 CancellationDecider (follow-up): "${query}" -> CONTINUE (non-cancellation)`);
-      return CancellationDecision.CONTINUE;
+      return {
+        decision: CancellationDecision.CONTINUE,
+        isAffirmative: false,
+      };
     }
 
     // In follow-up mode, only flag OBVIOUS cancellations (no fuzzy matching)
     // This prevents false positives from natural responses
     if (this.isObviousCancellation(query)) {
       console.log(`🚫 CancellationDecider (follow-up): "${query}" -> CANCEL (obvious)`);
-      return CancellationDecision.CANCEL;
+      return {
+        decision: CancellationDecision.CANCEL,
+        isAffirmative: false,
+      };
     }
 
     // Default to CONTINUE in follow-up mode (more lenient)
     console.log(`🚫 CancellationDecider (follow-up): "${query}" -> CONTINUE (default)`);
-    return CancellationDecision.CONTINUE;
+    return {
+      decision: CancellationDecision.CONTINUE,
+      isAffirmative: false,
+    };
   }
 }
 
