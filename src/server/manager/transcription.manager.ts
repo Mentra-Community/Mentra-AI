@@ -16,6 +16,13 @@ import { UserSettings } from '../schemas';
 const logger = _logger.child({ service: 'TranscriptionManager' });
 
 /**
+ * Debug flag to enable/disable live transcription logging
+ * Set to true to see ALL transcriptions (including ambient) in terminal
+ * Set to false to only see relevant transcriptions (wake word, follow-up, etc.)
+ */
+const DEBUG_LOG_ALL_TRANSCRIPTIONS = true;
+
+/**
  * Manages the transcription state for active sessions
  */
 export class TranscriptionManager {
@@ -105,10 +112,20 @@ export class TranscriptionManager {
   }
 
   /**
+   * Debug helper to log ALL transcriptions when DEBUG_LOG_ALL_TRANSCRIPTIONS is enabled
+   */
+  private debugLogTranscription(text: string, isFinal: boolean, context: string): void {
+    if (DEBUG_LOG_ALL_TRANSCRIPTIONS) {
+      console.log(`🐛 [DEBUG] [${new Date().toISOString()}] ${context}: "${text}" (isFinal: ${isFinal})`);
+    }
+  }
+
+  /**
    * Process incoming transcription data
    */
   async handleTranscription(transcriptionData: any): Promise<void> {
-    console.log(`🎤 [${new Date().toISOString()}] Transcription received: "${transcriptionData.text}" (isFinal: ${transcriptionData.isFinal}, followUpMode: ${this.isInFollowUpMode})`);
+    // Debug logging (only if DEBUG_LOG_ALL_TRANSCRIPTIONS is enabled)
+    this.debugLogTranscription(transcriptionData.text, transcriptionData.isFinal, 'Transcription received');
 
     // Broadcast transcription to SSE clients
     this.broadcastTranscription(transcriptionData.text, !!transcriptionData.isFinal);
@@ -124,6 +141,10 @@ export class TranscriptionManager {
 
     // Handle follow-up mode: no wake word required, just process the transcription
     if (this.isInFollowUpMode) {
+      // Log only if debug mode is not already logging everything
+      if (!DEBUG_LOG_ALL_TRANSCRIPTIONS) {
+        console.log(`🔄 [${new Date().toISOString()}] Transcription received (follow-up): "${transcriptionData.text}" (isFinal: ${transcriptionData.isFinal})`);
+      }
       await this.handleFollowUpTranscription(transcriptionData);
       return;
     }
@@ -136,12 +157,23 @@ export class TranscriptionManager {
     // Gate wake word if the optional mode is enabled
     if (!this.isListeningToQuery) {
       if (!hasWakeWord) {
+        // Skip logging ambient conversation (no wake word detected)
+        // Debug logging already happened above if enabled
         return;
       }
       if (requireHeadUpWindow && !withinHeadWindow) {
         // Wake word was spoken but not within the head-up window; ignore
         this.logger.debug('Wake word ignored: outside head-up activation window');
         return;
+      }
+      // Log only when wake word is detected (unless debug mode already logged it)
+      if (!DEBUG_LOG_ALL_TRANSCRIPTIONS) {
+        console.log(`🎤 [${new Date().toISOString()}] Wake word detected: "${transcriptionData.text}" (isFinal: ${transcriptionData.isFinal})`);
+      }
+    } else {
+      // Log when actively listening to a query (unless debug mode already logged it)
+      if (!DEBUG_LOG_ALL_TRANSCRIPTIONS) {
+        console.log(`🎤 [${new Date().toISOString()}] Transcription received (listening): "${transcriptionData.text}" (isFinal: ${transcriptionData.isFinal})`);
       }
     }
 
@@ -257,7 +289,7 @@ export class TranscriptionManager {
    */
   private async handleFollowUpTranscription(transcriptionData: any): Promise<void> {
     const text = transcriptionData.text;
-    console.log(`🔄 [${new Date().toISOString()}] Follow-up transcription: "${text}" (isFinal: ${transcriptionData.isFinal})`);
+    // Note: Already logged in handleTranscription when entering this function
 
     // Cancel the 5-second timeout since user is speaking
     if (this.followUpTimeoutId) {
@@ -265,33 +297,39 @@ export class TranscriptionManager {
       this.followUpTimeoutId = undefined;
     }
 
-    // Check for cancellation using AI-powered context-aware decider for follow-up mode
-    // This checks both affirmative phrases and cancellation phrases
-    const result = await this.cancellationDecider.checkIfWantsToCancelInFollowUpMode(text);
+    // CRITICAL: Only check for cancellation/affirmative on FINAL transcriptions
+    // Checking on partial transcriptions (isFinal: false) causes false positives
+    // Example: "You got" (partial) → incorrectly detected as affirmative
+    //          "You got to find it" (complete) → correctly not affirmative
+    if (transcriptionData.isFinal) {
+      // Check for cancellation using AI-powered context-aware decider for follow-up mode
+      // This checks both affirmative phrases and cancellation phrases
+      const result = await this.cancellationDecider.checkIfWantsToCancelInFollowUpMode(text);
 
-    // Handle affirmative phrases (user wants to end conversation gracefully)
-    // IMPORTANT: Only end gracefully if NOT in clarification mode
-    // In clarification mode, "sure"/"yes" means "continue with task", not "end conversation"
-    if (result.isAffirmative && !this.isListeningToQuery) {
-      console.log(`✅ [${new Date().toISOString()}] Affirmative phrase detected - ending follow-up mode gracefully`);
+      // Handle affirmative phrases (user wants to end conversation gracefully)
+      // IMPORTANT: Only end gracefully if NOT in clarification mode
+      // In clarification mode, "sure"/"yes" means "continue with task", not "end conversation"
+      if (result.isAffirmative && !this.isListeningToQuery) {
+        console.log(`✅ [${new Date().toISOString()}] Affirmative phrase detected - ending follow-up mode gracefully`);
 
-      // Cancel any pending query processing timeout
-      if (this.timeoutId) {
-        clearTimeout(this.timeoutId);
-        this.timeoutId = undefined;
+        // Cancel any pending query processing timeout
+        if (this.timeoutId) {
+          clearTimeout(this.timeoutId);
+          this.timeoutId = undefined;
+        }
+
+        // Use void to explicitly acknowledge we're not awaiting this async call
+        // The guard inside endFollowUpModeGracefully prevents concurrent executions
+        void this.endFollowUpModeGracefully();
+        return;
       }
 
-      // Use void to explicitly acknowledge we're not awaiting this async call
-      // The guard inside endFollowUpModeGracefully prevents concurrent executions
-      void this.endFollowUpModeGracefully();
-      return;
-    }
-
-    // Handle cancellation commands (user wants to stop immediately)
-    if (result.decision === CancellationDecision.CANCEL) {
-      console.log(`🚫 [${new Date().toISOString()}] Follow-up cancelled by user`);
-      this.cancelFollowUpMode();
-      return;
+      // Handle cancellation commands (user wants to stop immediately)
+      if (result.decision === CancellationDecision.CANCEL) {
+        console.log(`🚫 [${new Date().toISOString()}] Follow-up cancelled by user`);
+        this.cancelFollowUpMode();
+        return;
+      }
     }
 
     // Request photo for potential vision query

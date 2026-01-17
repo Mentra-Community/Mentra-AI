@@ -155,7 +155,7 @@ export class QueryProcessor {
     // Check if this is a clarification response to a pending query
     if (this.pendingClarification) {
       await this.handleClarificationResponse(query);
-      return true; // Clarification responses should allow follow-up mode
+      return false; // Clarification responses should NOT enter follow-up mode (they're just yes/no answers)
     }
 
     // Play processing sounds
@@ -251,7 +251,7 @@ export class QueryProcessor {
           const contextSummary = fullHistory
             .map((turn, idx) => `[${idx + 1}] User asked: "${turn.query}" -> You answered: "${turn.response}"`)
             .join('\n');
-          enhancedQuery = `${query}\n\n[CONTEXT FROM PREVIOUS EXCHANGES - USE THIS DATA TO ANSWER:\n${contextSummary}]`;
+          enhancedQuery = `${query}\n\n[IMPORTANT - MEMORY RECALL: The user is asking you to recall/repeat information from our previous conversation. You MUST extract the relevant information from the conversation history below and provide it in your response. Do NOT just say "that's the summary" - actually repeat the specific details they're asking about.]\n\n[CONTEXT FROM PREVIOUS EXCHANGES:\n${contextSummary}]`;
           console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📚 Injected ${fullHistory.length} conversation turns into query`);
         }
 

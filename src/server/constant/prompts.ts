@@ -123,8 +123,8 @@ export const RESPONSE_CONFIGS = CAMERA_RESPONSE_CONFIGS;
 /**
  * Conversation memory configuration
  */
-export const MAX_CONVERSATION_HISTORY = 10; // Keep last 10 exchanges (20 messages)
-export const MAX_CONVERSATION_AGE_MS = 30 * 60 * 1000; // 30 minutes
+export const MAX_CONVERSATION_HISTORY = 30; // Keep last 30 exchanges (60 messages)
+export const MAX_CONVERSATION_AGE_MS = 60 * 60 * 1000; // 60 minutes (1 hour)
 
 /**
  * Agent Gatekeeper prompt for routing user queries to appropriate agents

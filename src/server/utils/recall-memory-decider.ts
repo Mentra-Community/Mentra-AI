@@ -36,9 +36,10 @@ DEFINITELY NEEDS MEMORY RECALL (respond "RECALL"):
 - Going back to previous topic: "back to the X we discussed", "the thing I previously asked about"
 - Using "previously" or "earlier" with conversation reference: "I previously asked", "we talked about earlier"
 - Referencing something mentioned before: "the equation I mentioned", "that thing we discussed"
-- Any query with "previously talked about", "we discussed", "I mentioned", "you told me"
+- Any query with "previously talked about", "we discussed", "I mentioned", "you told me", "we talked about"
 - Questions about "the previous", "my last", "what I said/asked"
 - Follow-up on earlier topic using words like "back to", "returning to", "about that X"
+- Requesting summary/recap of past conversation: "give me the summary of X we talked about", "recap what we discussed", "summarize what I asked about"
 
 DOES NOT NEED MEMORY RECALL (respond "CONTINUE"):
 - Questions about something visible/physical: "what is this", "read this sign", "identify that", "solve this"
@@ -201,6 +202,16 @@ export class RecallMemoryDecider {
       return RecallDecision.RECALL;
     }
 
+    if (/(we|i) (talked|discussed|mentioned) about/i.test(queryLower)) {
+      console.log(`🧠 RecallMemoryDecider: "${query}" -> RECALL (fast check: we/I talked/discussed about)`);
+      return RecallDecision.RECALL;
+    }
+
+    if (/(summary|recap|overview|details) (of|about) .+ (we|i) (talked|discussed|mentioned)/i.test(queryLower)) {
+      console.log(`🧠 RecallMemoryDecider: "${query}" -> RECALL (fast check: summary/recap of X we talked about)`);
+      return RecallDecision.RECALL;
+    }
+
     return null; // Continue to LLM check
   }
 
@@ -260,7 +271,9 @@ export class RecallMemoryDecider {
       'my last question', 'my previous question', 'remind me',
       'repeat that', 'say that again', 'what did you say',
       'what were we talking about', 'earlier you mentioned',
-      'previously talked about', 'we discussed', 'go back to',
+      'previously talked about', 'we discussed', 'we talked about',
+      'i talked about', 'i discussed', 'go back to',
+      'summary of', 'recap of', 'summarize what',
     ];
 
     for (const phrase of recallPhrases) {

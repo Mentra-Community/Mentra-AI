@@ -17,6 +17,7 @@ Determine if the user's query requires looking at something through the camera.
 
 DEFINITELY REQUIRES CAMERA (respond "YES"):
 - Asking about something they're looking at: "what is this", "tell me about this", "what am i looking at"
+- Asking what something looks like: "what does this look like", "what does the food look like", "what does X look like", "how does this look", "how does X look"
 - Asking to read/translate visible text: "read this", "translate that sign", "what does it say"
 - Asking to identify something: "identify this", "what brand is this", "who is this"
 - Asking to fix/diagnose something visible: "what's wrong with this", "how do i fix this", "why isn't this working"
@@ -24,7 +25,7 @@ DEFINITELY REQUIRES CAMERA (respond "YES"):
 - Asking about colors, counts, sizes of visible things: "what color is this", "how many are there"
 - Asking to identify visible surroundings/landmarks: "what building is this", "what store is that", "what restaurant is this"
 - Asking for price, name, or info about "this" or "that" object: "what's the price of this", "tell me the plant", "the price of this"
-- ANY query containing "this" or "that" when asking about physical properties (price, name, type, brand, color, size) = YES
+- ANY query containing "this" or "that" when asking about physical properties (price, name, type, brand, color, size, appearance) = YES
 
 DEFINITELY DOES NOT REQUIRE CAMERA (respond "NO"):
 - Greetings and casual conversation: "hi", "hello", "hey", "what's up", "how are you", "good morning", "yo", "sup"
@@ -117,9 +118,17 @@ export class VisionQueryDecider {
       return VisionDecision.YES;
     }
 
-    // Ambiguous patterns - "what am I working on", "what am I looking at"
-    if (/what am i (working|looking|doing|seeing)\b/i.test(queryLower)) {
-      console.log(`🤖 VisionQueryDecider: "${query}" -> UNSURE (fast check: what am I X)`);
+    // CLEAR vision patterns - "what am I looking at", "what am I seeing"
+    // These are asking about what's visible through the camera RIGHT NOW
+    if (/what am i (looking at|seeing)\b/i.test(queryLower)) {
+      console.log(`🤖 VisionQueryDecider: "${query}" -> YES (fast check: what am I looking at/seeing)`);
+      return VisionDecision.YES;
+    }
+
+    // Ambiguous patterns - "what am I working on", "what am I doing"
+    // These COULD be asking about visible work OR abstract current task
+    if (/what am i (working on|doing)\b/i.test(queryLower)) {
+      console.log(`🤖 VisionQueryDecider: "${query}" -> UNSURE (fast check: what am I working/doing)`);
       return VisionDecision.UNSURE;
     }
 

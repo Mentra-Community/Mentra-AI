@@ -132,19 +132,24 @@ export class CancellationDecider {
     try {
       const llm = LLMProvider.getLLM(50);
 
-      const prompt = `Analyze if this user phrase is a conversational acknowledgment/affirmative response (like "thank you", "okay", "got it") that indicates they want to END the conversation.
+      const prompt = `Analyze if this user phrase is a COMPLETE conversational acknowledgment/affirmative response (like "thank you", "okay", "got it") that indicates they want to END the conversation.
+
+CRITICAL: INCOMPLETE PHRASES are NOT affirmative - they are likely the START of a longer sentence.
 
 User phrase: "${text}"
 
 Return ONLY "yes" or "no".
 
-Examples:
-- "thank you" → yes
-- "okay" → yes
-- "got it" → yes
-- "sounds good" → yes
-- "perfect" → yes
-- "no thank you" → no (polite decline, not acknowledgment)
+Examples of AFFIRMATIVE (yes):
+- "thank you" → yes (complete acknowledgment)
+- "okay" → yes (complete acknowledgment)
+- "got it" → yes (complete acknowledgment)
+- "sounds good" → yes (complete acknowledgment)
+- "perfect" → yes (complete acknowledgment)
+- "thanks so much" → yes (complete acknowledgment)
+
+Examples of NOT AFFIRMATIVE (no):
+- "no thank you" → no (polite decline)
 - "uh no thanks" → no (decline)
 - "nah thanks" → no (decline)
 - "not really" → no (decline)
@@ -152,6 +157,13 @@ Examples:
 - "how do I cancel" → no (new query)
 - "cancel that" → no (cancellation command)
 - "stop" → no (cancellation command)
+- "you got" → no (INCOMPLETE - likely "you got to..." or "you got it wrong")
+- "you got to" → no (INCOMPLETE - user is mid-sentence)
+- "i got" → no (INCOMPLETE - likely "I got a question" or "I got to...")
+- "i want" → no (INCOMPLETE - user is starting a request)
+- "you need" → no (INCOMPLETE - user is mid-sentence)
+- "let me" → no (INCOMPLETE - user is starting a sentence)
+- "i think" → no (INCOMPLETE - user is sharing thoughts)
 
 Answer:`;
 
@@ -216,12 +228,72 @@ Answer:`;
     ];
 
     for (const phrase of obviousPhrases) {
-      if (cleanedText === phrase || cleanedText.startsWith(phrase + ' ')) {
+      // Check if phrase appears as:
+      // - exact match: "cancel"
+      // - at the start: "cancel that"
+      // - at the end with filler words: "um cancel", "uh cancel", "umm cancel"
+      if (cleanedText === phrase ||
+          cleanedText.startsWith(phrase + ' ') ||
+          cleanedText.endsWith(' ' + phrase) ||
+          /^(um|uh|umm|uhh|er|erm)\s+/.test(cleanedText) && cleanedText.includes(phrase)) {
         return true;
       }
     }
 
     return false;
+  }
+
+  /**
+   * AI-powered cancellation detection
+   * Uses LLM to determine if a phrase is a cancellation command
+   */
+  public async isCancellationPhraseAI(text: string): Promise<boolean> {
+    try {
+      const llm = LLMProvider.getLLM(50);
+
+      const prompt = `Analyze if this user phrase is a CANCELLATION COMMAND that means they want to STOP or CANCEL the current action.
+
+User phrase: "${text}"
+
+Return ONLY "yes" or "no".
+
+Examples of CANCELLATION (yes):
+- "cancel" → yes (clear cancellation)
+- "stop" → yes (clear cancellation)
+- "never mind" → yes (cancellation)
+- "nevermind" → yes (cancellation)
+- "forget it" → yes (cancellation)
+- "um cancel" → yes (cancellation with filler word)
+- "uh stop" → yes (cancellation with filler word)
+- "no no" → yes (emphatic cancellation)
+- "quit" → yes (cancellation)
+
+Examples of NOT CANCELLATION (no):
+- "cancer" → no (medical term, NOT cancellation)
+- "how do I cancel my subscription" → no (asking a question about cancellation, not commanding to cancel)
+- "can I cancel this" → no (asking if they can cancel, not canceling)
+- "should I cancel" → no (asking for advice)
+- "what is cancer" → no (medical question)
+- "thank you" → no (affirmative acknowledgment)
+- "okay" → no (affirmative acknowledgment)
+- "yes" → no (affirmative response)
+- "sure" → no (affirmative response)
+- "what time is it" → no (new query)
+
+Answer:`;
+
+      const response = await llm.invoke(prompt);
+      const answer = response.content.toString().toLowerCase().trim();
+
+      const isCancellation = answer === 'yes';
+      console.log(`🤖 AI cancellation detection: "${text}" → ${isCancellation ? 'YES' : 'NO'} (raw: "${answer}")`);
+
+      return isCancellation;
+    } catch (error) {
+      console.error(`❌ AI cancellation detection failed, falling back to regex:`, error);
+      // Fallback to regex-based detection
+      return this.isObviousCancellation(text);
+    }
   }
 
   /**
@@ -242,21 +314,21 @@ Answer:`;
       };
     }
 
+    // Use AI-powered cancellation detection
+    const isCancellation = await this.isCancellationPhraseAI(query);
+    if (isCancellation) {
+      console.log(`🚫 CancellationDecider (follow-up): "${query}" -> CANCEL (AI detected cancellation)`);
+      return {
+        decision: CancellationDecision.CANCEL,
+        isAffirmative: false,
+      };
+    }
+
     // Non-cancellation queries are safe
     if (this.isNonCancellationQuery(query)) {
       console.log(`🚫 CancellationDecider (follow-up): "${query}" -> CONTINUE (non-cancellation)`);
       return {
         decision: CancellationDecision.CONTINUE,
-        isAffirmative: false,
-      };
-    }
-
-    // In follow-up mode, only flag OBVIOUS cancellations (no fuzzy matching)
-    // This prevents false positives from natural responses
-    if (this.isObviousCancellation(query)) {
-      console.log(`🚫 CancellationDecider (follow-up): "${query}" -> CANCEL (obvious)`);
-      return {
-        decision: CancellationDecision.CANCEL,
         isAffirmative: false,
       };
     }
