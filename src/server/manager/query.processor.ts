@@ -341,7 +341,12 @@ export class QueryProcessor {
           console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📚 Added CameraQuestionAgent response to MiraAgent conversation history`);
         }
       } else {
-        // Use MiraAgent for general queries
+        // Use MiraAgent for general queries (not a vision query)
+        // Clear cached photo since it won't be used
+        if (!isVisionQuery && photo) {
+          this.photoManager.clearPhoto();
+          console.log(`⏱️  [+${agentStartTime - processQueryStartTime}ms] 📸 Vision decider: NO - cleared cached photo`);
+        }
         console.log(`⏱️  [+${agentStartTime - processQueryStartTime}ms] 🤖 Invoking MiraAgent.handleContext...`);
         agentResponse = await this.miraAgent.handleContext(inputData);
         const agentEndTime = Date.now();
@@ -532,8 +537,9 @@ export class QueryProcessor {
           console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📚 Added CameraQuestionAgent response to MiraAgent conversation history`);
         }
       } else {
-        // User said no or no camera agent available
-        console.log(`⏱️  [+${agentStartTime - processQueryStartTime}ms] 🤖 No camera needed - Routing to MiraAgent...`);
+        // User said no or no camera agent available - clear cached photo
+        this.photoManager.clearPhoto();
+        console.log(`⏱️  [+${agentStartTime - processQueryStartTime}ms] 🤖 No camera needed - cleared cached photo, routing to MiraAgent...`);
         agentResponse = await this.miraAgent.handleContext(inputData);
         const agentEndTime = Date.now();
         console.log(`⏱️  [+${agentEndTime - processQueryStartTime}ms] ✅ MiraAgent completed (took ${agentEndTime - agentStartTime}ms)`);
