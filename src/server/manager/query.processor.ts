@@ -176,6 +176,31 @@ export class QueryProcessor {
       // Get conversation history for context-aware decisions
       const conversationHistory = this.miraAgent.getConversationHistoryForDecider();
 
+      // Check if this is a response to a pending disambiguation (e.g., user answering "which app?")
+      // This check MUST happen before recallDecision to prevent misclassification as RECALL
+      if (this.miraAgent.hasPendingDisambiguation()) {
+        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📋 Pending disambiguation detected - routing to MiraAgent`);
+        stopProcessingSounds();
+
+        // Send query to frontend
+        if (this.chatManager && query.trim().length > 0 && !this.currentQueryMessageId) {
+          this.currentQueryMessageId = this.chatManager.addUserMessage(this.userId, query);
+          this.chatManager.setProcessing(this.userId, true);
+        }
+
+        // Route directly to MiraAgent which will handle the disambiguation response
+        const agentResponse = await this.miraAgent.handleContext({
+          query,
+          originalQuery: query,
+          photo: null,
+          getPhotoCallback: async () => null,
+          hasDisplay: this.session.capabilities?.hasDisplay,
+        });
+
+        await this.handleAgentResponse(agentResponse, query, null, processQueryStartTime);
+        return true;
+      }
+
       // Check if this is a memory recall or vision retry query (AI-powered with conversation context)
       const recallDecision = await this.recallMemoryDecider.checkIfNeedsRecall(query, conversationHistory);
 

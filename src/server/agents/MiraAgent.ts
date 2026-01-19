@@ -32,6 +32,7 @@ import {
 import { UserSettings } from "../schemas";
 import { buildSystemPromptWithPersonality } from "../utils/prompt.util";
 import { PersonalityType } from "../constant/personality";
+import { getDisambiguationDetector, DisambiguationCandidate } from "../utils/disambiguation-detector";
 
 interface QuestionAnswer {
     insight: string;
@@ -40,6 +41,13 @@ interface QuestionAnswer {
 interface ConversationTurn {
   query: string;
   response: string;
+  timestamp: number;
+}
+
+interface PendingDisambiguation {
+  originalRequest: string;  // e.g., "open Mentra Notes"
+  candidates: Array<{ packageName: string; name: string; description?: string }>;
+  action: 'start' | 'stop';
   timestamp: number;
 }
 
@@ -56,6 +64,7 @@ export class MiraAgent implements Agent {
 
   public messages: BaseMessage[] = [];
   private conversationHistory: ConversationTurn[] = [];
+  private pendingDisambiguation: PendingDisambiguation | null = null;
 
   private locationContext: {
     city: string;
@@ -250,6 +259,242 @@ export class MiraAgent implements Agent {
    */
   public clearConversationHistory(): void {
     this.conversationHistory = [];
+  }
+
+  /**
+   * Set pending disambiguation when SmartAppControl asks user to choose
+   */
+  public setPendingDisambiguation(
+    originalRequest: string,
+    candidates: Array<{ packageName: string; name: string; description?: string }>,
+    action: 'start' | 'stop'
+  ): void {
+    this.pendingDisambiguation = {
+      originalRequest,
+      candidates,
+      action,
+      timestamp: Date.now()
+    };
+    console.log(`📋 [Disambiguation] Stored pending disambiguation for "${originalRequest}" with ${candidates.length} candidates`);
+  }
+
+  /**
+   * Check if there's a pending disambiguation and if the user's response matches a candidate
+   * Returns the matched candidate or null if no match
+   */
+  public checkDisambiguationResponse(userResponse: string): {
+    matched: boolean;
+    candidate?: { packageName: string; name: string };
+    action?: 'start' | 'stop';
+    originalRequest?: string;
+  } {
+    if (!this.pendingDisambiguation) {
+      return { matched: false };
+    }
+
+    // Expire disambiguation after 2 minutes
+    if (Date.now() - this.pendingDisambiguation.timestamp > 2 * 60 * 1000) {
+      console.log(`📋 [Disambiguation] Expired - clearing pending disambiguation`);
+      this.pendingDisambiguation = null;
+      return { matched: false };
+    }
+
+    const responseLower = userResponse.toLowerCase().trim();
+    const { candidates, action, originalRequest } = this.pendingDisambiguation;
+
+    // Check for ordinal responses like "first one", "second one", "the first", etc.
+    const ordinalPatterns = [
+      { pattern: /\b(first|1st|one|1)\b/i, index: 0 },
+      { pattern: /\b(second|2nd|two|2)\b/i, index: 1 },
+      { pattern: /\b(third|3rd|three|3)\b/i, index: 2 },
+      { pattern: /\b(fourth|4th|four|4)\b/i, index: 3 },
+    ];
+
+    for (const { pattern, index } of ordinalPatterns) {
+      if (pattern.test(responseLower) && candidates[index]) {
+        console.log(`📋 [Disambiguation] Matched by ordinal: "${userResponse}" -> ${candidates[index].name}`);
+        this.pendingDisambiguation = null;
+        return { matched: true, candidate: candidates[index], action, originalRequest };
+      }
+    }
+
+    // Check for "regular" which typically means the non-dev/non-test version
+    if (/\bregular\b/i.test(responseLower)) {
+      // Find the candidate without [Dev], [Test], [Beta], etc. in the name
+      const regularCandidate = candidates.find(c =>
+        !c.name.includes('[') && !c.name.toLowerCase().includes('dev') && !c.name.toLowerCase().includes('test')
+      ) || candidates[0]; // Fall back to first if no "regular" version found
+
+      console.log(`📋 [Disambiguation] Matched "regular": "${userResponse}" -> ${regularCandidate.name}`);
+      this.pendingDisambiguation = null;
+      return { matched: true, candidate: regularCandidate, action, originalRequest };
+    }
+
+    // Check for direct name match
+    for (const candidate of candidates) {
+      const nameLower = candidate.name.toLowerCase();
+      // Check if the response contains the app name or key parts of it
+      if (responseLower.includes(nameLower) || nameLower.includes(responseLower.replace(/[.,!?]/g, ''))) {
+        console.log(`📋 [Disambiguation] Matched by name: "${userResponse}" -> ${candidate.name}`);
+        this.pendingDisambiguation = null;
+        return { matched: true, candidate, action, originalRequest };
+      }
+
+      // Check for bracketed qualifiers like [Dev], [Test], etc.
+      const bracketMatch = candidate.name.match(/\[([^\]]+)\]/);
+      if (bracketMatch && responseLower.includes(bracketMatch[1].toLowerCase())) {
+        console.log(`📋 [Disambiguation] Matched by qualifier: "${userResponse}" -> ${candidate.name}`);
+        this.pendingDisambiguation = null;
+        return { matched: true, candidate, action, originalRequest };
+      }
+    }
+
+    console.log(`📋 [Disambiguation] No match found for "${userResponse}"`);
+    return { matched: false };
+  }
+
+  /**
+   * Clear pending disambiguation
+   */
+  public clearPendingDisambiguation(): void {
+    this.pendingDisambiguation = null;
+  }
+
+  /**
+   * Check if there's a pending disambiguation
+   */
+  public hasPendingDisambiguation(): boolean {
+    if (!this.pendingDisambiguation) return false;
+    // Expire after 2 minutes
+    if (Date.now() - this.pendingDisambiguation.timestamp > 2 * 60 * 1000) {
+      this.pendingDisambiguation = null;
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * AI-powered detection of disambiguation responses
+   * Uses an LLM to intelligently detect if a response is asking the user to choose between options
+   * and extracts the candidate names
+   */
+  private async detectAndStoreDisambiguationAI(response: string, originalQuery: string): Promise<void> {
+    try {
+      const detector = getDisambiguationDetector();
+      const result = await detector.detectDisambiguation(response);
+
+      console.log(`📋 [Disambiguation AI] isDisambiguation: ${result.isDisambiguation}, reasoning: ${result.reasoning}`);
+
+      if (!result.isDisambiguation || result.candidates.length < 2) {
+        console.log(`📋 [Disambiguation AI] Not a disambiguation response or insufficient candidates`);
+        return;
+      }
+
+      console.log(`📋 [Disambiguation AI] Detected ${result.candidates.length} candidates: ${result.candidates.map(c => c.name).join(', ')}`);
+
+      // Determine action from original query
+      const queryLower = originalQuery.toLowerCase();
+      const action: 'start' | 'stop' =
+        queryLower.includes('close') || queryLower.includes('stop') || queryLower.includes('quit')
+          ? 'stop' : 'start';
+
+      // Convert to the format expected by setPendingDisambiguationWithLookup
+      const candidates = result.candidates.map(c => ({
+        packageName: c.packageName || '',
+        name: c.name
+      }));
+
+      // Look up package names and store disambiguation
+      await this.setPendingDisambiguationWithLookup(originalQuery, candidates, action);
+    } catch (error) {
+      console.error(`📋 [Disambiguation AI] Error detecting disambiguation:`, error);
+      // Silently fail - worst case is disambiguation isn't stored and user has to be more explicit
+    }
+  }
+
+  /**
+   * Store disambiguation with async lookup of package names
+   */
+  private async setPendingDisambiguationWithLookup(
+    originalRequest: string,
+    candidates: Array<{ packageName: string; name: string }>,
+    action: 'start' | 'stop'
+  ): Promise<void> {
+    console.log(`📋 [Disambiguation Lookup] Starting lookup for ${candidates.length} candidates: ${candidates.map(c => c.name).join(', ')}`);
+
+    // Try to get package names from TPA_ListApps
+    const tpaListAppsTool = this.agentTools.find(t => t.name === 'TPA_ListApps') as any;
+    if (tpaListAppsTool) {
+      try {
+        const appsResult = await tpaListAppsTool._call({ includeRunning: false });
+        const apps = JSON.parse(appsResult);
+        console.log(`📋 [Disambiguation Lookup] Found ${apps.length} apps to search through`);
+
+        if (Array.isArray(apps)) {
+          // Match candidates to apps using fuzzy matching
+          for (const candidate of candidates) {
+            const candidateLower = candidate.name.toLowerCase().trim();
+            // Remove common words and brackets for matching
+            const candidateClean = candidateLower
+              .replace(/\[.*?\]/g, '') // Remove bracketed text like [Dev]
+              .replace(/\s+/g, ' ')
+              .trim();
+
+            console.log(`📋 [Disambiguation Lookup] Searching for candidate: "${candidate.name}" (clean: "${candidateClean}")`);
+
+            const matchedApp = apps.find((app: any) => {
+              const appNameLower = app.name.toLowerCase().trim();
+              const appNameClean = appNameLower
+                .replace(/\[.*?\]/g, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+
+              // Multiple matching strategies
+              const exactMatch = appNameLower === candidateLower;
+              const cleanMatch = appNameClean === candidateClean;
+              const containsMatch = appNameLower.includes(candidateLower) || candidateLower.includes(appNameLower);
+              const cleanContainsMatch = appNameClean.includes(candidateClean) || candidateClean.includes(appNameClean);
+
+              // Check if the base names match (e.g., "Mentra Notes" matches "Mentra Notes [Dev]")
+              const baseNameMatch = candidateClean.length >= 3 && (
+                appNameClean.startsWith(candidateClean) ||
+                candidateClean.startsWith(appNameClean)
+              );
+
+              const isMatch = exactMatch || cleanMatch || containsMatch || cleanContainsMatch || baseNameMatch;
+
+              if (isMatch) {
+                console.log(`📋 [Disambiguation Lookup] ✅ Match found: "${app.name}" (${app.packageName})`);
+              }
+
+              return isMatch;
+            });
+
+            if (matchedApp) {
+              candidate.packageName = matchedApp.packageName;
+              candidate.name = matchedApp.name; // Use the actual app name
+            } else {
+              console.log(`📋 [Disambiguation Lookup] ❌ No match found for "${candidate.name}"`);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('📋 [Disambiguation Lookup] Error looking up package names:', error);
+      }
+    } else {
+      console.log(`📋 [Disambiguation Lookup] TPA_ListApps tool not found!`);
+    }
+
+    // Filter out candidates without package names (couldn't be matched)
+    const validCandidates = candidates.filter(c => c.packageName);
+    console.log(`📋 [Disambiguation Lookup] Valid candidates after lookup: ${validCandidates.length} - ${validCandidates.map(c => `${c.name} (${c.packageName})`).join(', ')}`);
+
+    if (validCandidates.length >= 2) {
+      this.setPendingDisambiguation(originalRequest, validCandidates, action);
+      console.log(`📋 [Disambiguation] ✅ Successfully stored disambiguation with ${validCandidates.length} candidates`);
+    } else {
+      console.log(`📋 [Disambiguation] ❌ Could not find package names for enough candidates (need 2+, got ${validCandidates.length})`);
+    }
   }
 
   /**
@@ -893,6 +1138,34 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
       console.log("Query:", query);
       console.log("Query lowercase:", query.toLowerCase());
 
+      // STEP 0a: Check if this is a response to a pending disambiguation
+      if (this.hasPendingDisambiguation()) {
+        console.log(`⏱️  [+${Date.now() - startTime}ms] 📋 Checking if query is disambiguation response...`);
+        const disambigResult = this.checkDisambiguationResponse(query);
+        if (disambigResult.matched && disambigResult.candidate) {
+          console.log(`⏱️  [+${Date.now() - startTime}ms] ✅ Disambiguation matched: ${disambigResult.candidate.name}`);
+
+          // Execute the app action directly using TpaCommandsTool
+          const tpaCommandsTool = this.agentTools.find(t => t.name === 'TPA_Commands') as any;
+          if (tpaCommandsTool) {
+            try {
+              const actionResult = await tpaCommandsTool._call({
+                action: disambigResult.action,
+                packageName: disambigResult.candidate.packageName
+              });
+              const finalAnswer = actionResult || `I've ${disambigResult.action === 'start' ? 'opened' : 'closed'} ${disambigResult.candidate.name} for you.`;
+              this.addToConversationHistory(originalQuery, finalAnswer);
+              return { answer: finalAnswer, needsCamera: false };
+            } catch (error) {
+              console.error(`⏱️  [+${Date.now() - startTime}ms] ❌ Error executing disambiguation action:`, error);
+              const errorAnswer = `Sorry, I had trouble ${disambigResult.action === 'start' ? 'opening' : 'closing'} ${disambigResult.candidate.name}.`;
+              this.addToConversationHistory(originalQuery, errorAnswer);
+              return { answer: errorAnswer, needsCamera: false };
+            }
+          }
+        }
+      }
+
       // STEP 0: Detect if this is a follow-up query and enhance it with context
       console.log(`⏱️  [+${Date.now() - startTime}ms] 🔍 Checking if query is a follow-up...`);
       const isFollowUp = await this.detectRelatedQuery(query);
@@ -1042,6 +1315,11 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
       console.log(`⏱️  [+${totalDuration}ms] 📝 RETURNING TEXT-BASED RESPONSE`);
       console.log(`⏱️  Total processing time: ${(totalDuration / 1000).toFixed(2)}s`);
       console.log(`${"=".repeat(60)}\n`);
+
+      // Check if the response is asking for disambiguation (e.g., "Which app: A or B?")
+      // If so, store the disambiguation context for the follow-up response
+      // Using AI-powered detection for more robust pattern matching
+      await this.detectAndStoreDisambiguationAI(textResult.answer, originalQuery);
 
       // Save to conversation history (use originalQuery to avoid storing injected context)
       this.addToConversationHistory(originalQuery, textResult.answer);
