@@ -93,7 +93,7 @@ class MiraServer extends AppServer {
 
     // Serve static files from the built frontend (in production)
     if (process.env.NODE_ENV === 'production') {
-      const staticPath = path.join(__dirname, '../dist/frontend');
+      const staticPath = path.join(__dirname, '../../dist/frontend');
       app.use(express.static(staticPath));
 
       // Catch-all route for React app - must be registered after all API routes
@@ -102,7 +102,7 @@ class MiraServer extends AppServer {
         if (req.path.startsWith('/api') || req.path.startsWith('/webhook')) {
           return next();
         }
-        res.sendFile(path.join(__dirname, '../dist/frontend/index.html'));
+        res.sendFile(path.join(__dirname, '../../dist/frontend/index.html'));
       });
     }
   }
