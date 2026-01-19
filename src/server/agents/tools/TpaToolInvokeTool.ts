@@ -43,17 +43,13 @@ Empty parameters will cause errors for tools that require them.`;
     console.log("[TPA_InvokeTool] Invoking tool:", input);
 
     try {
-      // Use the app communication endpoint to invoke the tool
-      const url = `${this.cloudUrl}/api/app-communication/invoke-tool`;
+      // Use the system-app API endpoint to invoke the tool
+      const url = `${this.cloudUrl}/api/system-app/invoke-tool?apiKey=${AUGMENTOS_API_KEY}&packageName=${PACKAGE_NAME}&userId=${this.userId}`;
 
       const payload = {
         targetPackageName: input.targetPackageName,
         toolId: input.toolId,
-        parameters: input.parameters || {},
-        // Auth info
-        apiKey: AUGMENTOS_API_KEY,
-        sourcePackageName: PACKAGE_NAME,
-        userId: this.userId
+        parameters: input.parameters || {}
       };
 
       console.log(`[TPA_InvokeTool] Request URL: ${url}`);

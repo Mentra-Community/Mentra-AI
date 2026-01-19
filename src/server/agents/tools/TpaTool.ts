@@ -13,11 +13,20 @@ import axios, { AxiosError } from 'axios';
  * @throws AxiosError if the network request fails
  */
 
+const AUGMENTOS_API_KEY = process.env.AUGMENTOS_API_KEY;
+const PACKAGE_NAME = process.env.PACKAGE_NAME;
+
 export async function getAllToolsForPackage(cloudUrl: string, tpaPackageName: string, actingUserId: string) {
-  // Get the tools from the cloud
-  const urlToGetTools = `${cloudUrl}/api/tools/apps/${tpaPackageName}/tools`;
-  const response = await axios.get<ToolSchema[]>(urlToGetTools);
-  const toolSchemas = response.data;
+  // Get the tools from the cloud using the system-app API
+  const urlToGetTools = `${cloudUrl}/api/system-app/apps/${tpaPackageName}/tools?apiKey=${AUGMENTOS_API_KEY}&packageName=${PACKAGE_NAME}&userId=${actingUserId}`;
+  const response = await axios.get<{ success: boolean; data: ToolSchema[] }>(urlToGetTools);
+
+  if (!response.data || !response.data.success) {
+    console.log(`[getAllToolsForPackage] Invalid response format, returning empty tools array`);
+    return [];
+  }
+
+  const toolSchemas = response.data.data || [];
 
   // log tools
   for (const toolSchema of toolSchemas) {
@@ -104,8 +113,8 @@ export function compileTool(cloudUrl: string, tpaPackageName: string, tpaTool: T
   // Create the executable LangChain tool with async implementation
   return tool(
     async (input): Promise<string> => {
-      // Build webhook endpoint URL for this specific TPA tool
-      const webhookUrl = cloudUrl + `/api/tools/apps/${tpaPackageName}/tool`;
+      // Build webhook endpoint URL for this specific TPA tool using system-app API
+      const webhookUrl = cloudUrl + `/api/system-app/apps/${tpaPackageName}/tool?apiKey=${AUGMENTOS_API_KEY}&packageName=${PACKAGE_NAME}&userId=${actingUserId}`;
 
       // Handle different input formats - LangChain may pass strings or objects
       const params: any = typeof input === 'string' ? {} : input;
@@ -172,11 +181,8 @@ export function compileTool(cloudUrl: string, tpaPackageName: string, tpaTool: T
  * @returns A Set of package names for apps that are currently running
  */
 async function getRunningAppPackages(cloudUrl: string, userId: string): Promise<Set<string>> {
-  const AUGMENTOS_API_KEY = process.env.AUGMENTOS_API_KEY;
-  const PACKAGE_NAME = process.env.PACKAGE_NAME;
-
   try {
-    const url = `${cloudUrl}/api/apps?apiKey=${AUGMENTOS_API_KEY}&packageName=${PACKAGE_NAME}&userId=${userId}`;
+    const url = `${cloudUrl}/api/system-app/apps?apiKey=${AUGMENTOS_API_KEY}&packageName=${PACKAGE_NAME}&userId=${userId}`;
     const response = await axios.get(url);
 
     if (!response.data || !response.data.success) {
@@ -223,12 +229,18 @@ export async function getAllToolsForUser(cloudUrl: string, userId: string, onlyR
       }
     }
 
-    // Construct the URL to get all tools for the user
-    const urlToGetUserTools = `${cloudUrl}/api/tools/users/${userId}/tools`;
+    // Construct the URL to get all tools for the user using system-app API
+    const urlToGetUserTools = `${cloudUrl}/api/system-app/tools?apiKey=${AUGMENTOS_API_KEY}&packageName=${PACKAGE_NAME}&userId=${userId}`;
 
     // Make the request to get all tools for the user
-    const response = await axios.get<Array<ToolSchema & { appPackageName: string }>>(urlToGetUserTools);
-    const userTools = response.data;
+    const response = await axios.get<{ success: boolean; data: Array<ToolSchema & { appPackageName: string }> }>(urlToGetUserTools);
+
+    if (!response.data || !response.data.success) {
+      console.log(`[getAllToolsForUser] Invalid response format, returning empty tools array`);
+      return [];
+    }
+
+    const userTools = response.data.data || [];
 
     // Log the tools found for the user
     console.log(`Found ${userTools.length} total tools for user ${userId}`);
