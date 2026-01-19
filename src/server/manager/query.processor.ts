@@ -160,8 +160,8 @@ export class QueryProcessor {
 
     // Check if this is a clarification response to a pending vision query
     if (this.pendingClarification) {
-      await this.handleClarificationResponse(query);
-      return false; // Clarification responses should NOT enter follow-up mode (they're just yes/no answers)
+      const shouldEnterFollowUp = await this.handleClarificationResponse(query);
+      return shouldEnterFollowUp; // Enable follow-up if query was successfully processed
     }
 
     // Play processing sounds
@@ -520,8 +520,9 @@ export class QueryProcessor {
 
   /**
    * Handle clarification response (yes/no) for ambiguous vision queries
+   * Returns true if follow-up mode should be enabled (query was processed)
    */
-  private async handleClarificationResponse(response: string): Promise<void> {
+  private async handleClarificationResponse(response: string): Promise<boolean> {
     const pending = this.pendingClarification!;
     this.pendingClarification = null; // Clear pending state
 
@@ -555,7 +556,7 @@ export class QueryProcessor {
     const stopProcessingSounds = await this.audioManager.playProcessingSounds();
 
     try {
-      const { originalQuery, photo, processQueryStartTime } = pending;
+      const { originalQuery, photo: pendingPhoto, processQueryStartTime } = pending;
 
       // Send query to frontend if not already sent
       if (this.chatManager && originalQuery.trim().length > 0 && !this.currentQueryMessageId) {
@@ -570,6 +571,9 @@ export class QueryProcessor {
       };
 
       const hasDisplay = this.session.capabilities?.hasDisplay;
+
+      // Only use photo if user wants camera, otherwise set to null
+      const photo = useCamera ? pendingPhoto : null;
       const inputData = { query: originalQuery, photo, getPhotoCallback, hasDisplay };
 
       let agentResponse: any;
@@ -596,18 +600,26 @@ export class QueryProcessor {
         agentResponse = await this.miraAgent.handleContext(inputData);
         const agentEndTime = Date.now();
         console.log(`⏱️  [+${agentEndTime - processQueryStartTime}ms] ✅ MiraAgent completed (took ${agentEndTime - agentStartTime}ms)`);
+
+        // Override needsCamera to false since user explicitly said no to camera
+        if (agentResponse && typeof agentResponse === 'object') {
+          agentResponse.needsCamera = false;
+        }
       }
 
       // Stop processing sounds
       stopProcessingSounds();
 
-      // Handle response
+      // Handle response (photo is null if user said no)
       await this.handleAgentResponse(agentResponse, originalQuery, photo, processQueryStartTime);
+
+      return true; // Query was processed, enable follow-up mode
 
     } catch (error) {
       console.error('Error handling clarification response:', error);
       stopProcessingSounds();
       await this.audioManager.showOrSpeakText("Sorry, there was an error processing your request.");
+      return false; // Error occurred, don't enable follow-up mode
     }
   }
 
@@ -767,5 +779,13 @@ export class QueryProcessor {
    */
   clearCurrentQueryMessageId(): void {
     this.currentQueryMessageId = undefined;
+  }
+
+  /**
+   * Check if there's a pending disambiguation (AI asked user to choose between options)
+   * This is used to force follow-up mode even if it's disabled in settings
+   */
+  hasPendingDisambiguation(): boolean {
+    return this.miraAgent.hasPendingDisambiguation();
   }
 }

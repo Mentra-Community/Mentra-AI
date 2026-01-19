@@ -330,20 +330,74 @@ export class MiraAgent implements Agent {
       return { matched: true, candidate: regularCandidate, action, originalRequest };
     }
 
-    // Check for direct name match
+    // FIRST PASS: Check for bracketed qualifiers like [Dev], [Beta], [Test], etc.
+    // This must come first to ensure "Mentra Stream beta" matches "Mentra Stream [BETA]"
+    // instead of just "Mentra Stream"
     for (const candidate of candidates) {
-      const nameLower = candidate.name.toLowerCase();
-      // Check if the response contains the app name or key parts of it
-      if (responseLower.includes(nameLower) || nameLower.includes(responseLower.replace(/[.,!?]/g, ''))) {
-        console.log(`📋 [Disambiguation] Matched by name: "${userResponse}" -> ${candidate.name}`);
-        this.pendingDisambiguation = null;
-        return { matched: true, candidate, action, originalRequest };
-      }
-
-      // Check for bracketed qualifiers like [Dev], [Test], etc.
       const bracketMatch = candidate.name.match(/\[([^\]]+)\]/);
       if (bracketMatch && responseLower.includes(bracketMatch[1].toLowerCase())) {
         console.log(`📋 [Disambiguation] Matched by qualifier: "${userResponse}" -> ${candidate.name}`);
+        this.pendingDisambiguation = null;
+        return { matched: true, candidate, action, originalRequest };
+      }
+    }
+
+    // SECOND PASS: Check if user said "dev" and there's a [Dev ...] candidate
+    // This handles speech-to-text errors like "Dev Aryan" -> "Dev Area"
+    const responseWords = responseLower.replace(/[.,!?]/g, '').split(/\s+/);
+    if (responseWords.includes('dev') || responseWords.includes('development')) {
+      const devCandidate = candidates.find(c => c.name.toLowerCase().includes('[dev'));
+      if (devCandidate) {
+        console.log(`📋 [Disambiguation] Matched by "dev" keyword: "${userResponse}" -> ${devCandidate.name}`);
+        this.pendingDisambiguation = null;
+        return { matched: true, candidate: devCandidate, action, originalRequest };
+      }
+    }
+    if (responseWords.includes('beta') || responseWords.includes('test')) {
+      const betaCandidate = candidates.find(c =>
+        c.name.toLowerCase().includes('[beta') || c.name.toLowerCase().includes('[test')
+      );
+      if (betaCandidate) {
+        console.log(`📋 [Disambiguation] Matched by "beta/test" keyword: "${userResponse}" -> ${betaCandidate.name}`);
+        this.pendingDisambiguation = null;
+        return { matched: true, candidate: betaCandidate, action, originalRequest };
+      }
+    }
+
+    // THIRD PASS: Check for exact name match (response matches candidate name exactly)
+    const responseClean = responseLower.replace(/[.,!?]/g, '').trim();
+    for (const candidate of candidates) {
+      const nameLower = candidate.name.toLowerCase();
+      const nameClean = nameLower.replace(/\[.*?\]/g, '').trim(); // Remove bracketed parts for comparison
+
+      // Exact match (ignoring brackets on the candidate side)
+      if (responseClean === nameLower || responseClean === nameClean) {
+        console.log(`📋 [Disambiguation] Matched by exact name: "${userResponse}" -> ${candidate.name}`);
+        this.pendingDisambiguation = null;
+        return { matched: true, candidate, action, originalRequest };
+      }
+    }
+
+    // FOURTH PASS: Check for partial name match, but prefer MORE SPECIFIC matches
+    // If user says something that contains "dev", "beta", etc., prefer candidates with brackets
+    const hasQualifierWord = responseWords.some(w =>
+      ['dev', 'beta', 'test', 'alpha', 'prod', 'staging', 'debug'].includes(w)
+    );
+
+    // Sort candidates: bracketed ones first if user used qualifier words
+    const sortedCandidates = hasQualifierWord
+      ? [...candidates].sort((a, b) => {
+          const aHasBracket = a.name.includes('[') ? 0 : 1;
+          const bHasBracket = b.name.includes('[') ? 0 : 1;
+          return aHasBracket - bHasBracket;
+        })
+      : candidates;
+
+    for (const candidate of sortedCandidates) {
+      const nameLower = candidate.name.toLowerCase();
+      // Only match if response contains the FULL candidate name (not partial)
+      if (responseLower.includes(nameLower)) {
+        console.log(`📋 [Disambiguation] Matched by name contains: "${userResponse}" -> ${candidate.name}`);
         this.pendingDisambiguation = null;
         return { matched: true, candidate, action, originalRequest };
       }
@@ -395,7 +449,9 @@ export class MiraAgent implements Agent {
       // Determine action from original query
       const queryLower = originalQuery.toLowerCase();
       const action: 'start' | 'stop' =
-        queryLower.includes('close') || queryLower.includes('stop') || queryLower.includes('quit')
+        queryLower.includes('close') || queryLower.includes('stop') || queryLower.includes('quit') ||
+        queryLower.includes('turn off') || queryLower.includes('shut down') || queryLower.includes('exit') ||
+        queryLower.includes('kill') || queryLower.includes('end') || queryLower.includes('terminate')
           ? 'stop' : 'start';
 
       // Convert to the format expected by setPendingDisambiguationWithLookup
@@ -431,48 +487,73 @@ export class MiraAgent implements Agent {
         console.log(`📋 [Disambiguation Lookup] Found ${apps.length} apps to search through`);
 
         if (Array.isArray(apps)) {
-          // Match candidates to apps using fuzzy matching
+          // IMPORTANT: First, try to find EXACT matches for each candidate
+          // This prevents the AI from making up app names that don't exist
+          // and ensures we match the actual apps in the database
+
           for (const candidate of candidates) {
             const candidateLower = candidate.name.toLowerCase().trim();
-            // Remove common words and brackets for matching
+
+            console.log(`📋 [Disambiguation Lookup] Searching for candidate: "${candidate.name}"`);
+
+            // FIRST: Try exact name match (case-insensitive)
+            let matchedApp = apps.find((app: any) => {
+              const appNameLower = app.name.toLowerCase().trim();
+              return appNameLower === candidateLower;
+            });
+
+            if (matchedApp) {
+              console.log(`📋 [Disambiguation Lookup] ✅ Exact match found: "${matchedApp.name}" (${matchedApp.packageName})`);
+              candidate.packageName = matchedApp.packageName;
+              candidate.name = matchedApp.name;
+              continue;
+            }
+
+            // SECOND: Try to find app where candidate's bracketed qualifier matches
+            // e.g., "Mentra Stream [BETA]" should find an app with [BETA] in its name
+            const candidateBracket = candidate.name.match(/\[([^\]]+)\]/);
+            if (candidateBracket) {
+              const qualifier = candidateBracket[1].toLowerCase();
+              matchedApp = apps.find((app: any) => {
+                const appBracket = app.name.match(/\[([^\]]+)\]/);
+                if (appBracket && appBracket[1].toLowerCase() === qualifier) {
+                  // Also check that base names are similar
+                  const candidateBase = candidate.name.replace(/\[.*?\]/g, '').trim().toLowerCase();
+                  const appBase = app.name.replace(/\[.*?\]/g, '').trim().toLowerCase();
+                  return candidateBase === appBase || appBase.includes(candidateBase) || candidateBase.includes(appBase);
+                }
+                return false;
+              });
+
+              if (matchedApp) {
+                console.log(`📋 [Disambiguation Lookup] ✅ Qualifier match found: "${matchedApp.name}" (${matchedApp.packageName})`);
+                candidate.packageName = matchedApp.packageName;
+                candidate.name = matchedApp.name;
+                continue;
+              }
+            }
+
+            // THIRD: Fallback - fuzzy match only if no exact or qualifier match
             const candidateClean = candidateLower
-              .replace(/\[.*?\]/g, '') // Remove bracketed text like [Dev]
+              .replace(/\[.*?\]/g, '')
               .replace(/\s+/g, ' ')
               .trim();
 
-            console.log(`📋 [Disambiguation Lookup] Searching for candidate: "${candidate.name}" (clean: "${candidateClean}")`);
-
-            const matchedApp = apps.find((app: any) => {
+            matchedApp = apps.find((app: any) => {
               const appNameLower = app.name.toLowerCase().trim();
               const appNameClean = appNameLower
                 .replace(/\[.*?\]/g, '')
                 .replace(/\s+/g, ' ')
                 .trim();
 
-              // Multiple matching strategies
-              const exactMatch = appNameLower === candidateLower;
-              const cleanMatch = appNameClean === candidateClean;
-              const containsMatch = appNameLower.includes(candidateLower) || candidateLower.includes(appNameLower);
-              const cleanContainsMatch = appNameClean.includes(candidateClean) || candidateClean.includes(appNameClean);
-
-              // Check if the base names match (e.g., "Mentra Notes" matches "Mentra Notes [Dev]")
-              const baseNameMatch = candidateClean.length >= 3 && (
-                appNameClean.startsWith(candidateClean) ||
-                candidateClean.startsWith(appNameClean)
-              );
-
-              const isMatch = exactMatch || cleanMatch || containsMatch || cleanContainsMatch || baseNameMatch;
-
-              if (isMatch) {
-                console.log(`📋 [Disambiguation Lookup] ✅ Match found: "${app.name}" (${app.packageName})`);
-              }
-
-              return isMatch;
+              // Only match if base names are identical (after removing brackets)
+              return appNameClean === candidateClean;
             });
 
             if (matchedApp) {
+              console.log(`📋 [Disambiguation Lookup] ✅ Base name match found: "${matchedApp.name}" (${matchedApp.packageName})`);
               candidate.packageName = matchedApp.packageName;
-              candidate.name = matchedApp.name; // Use the actual app name
+              candidate.name = matchedApp.name;
             } else {
               console.log(`📋 [Disambiguation Lookup] ❌ No match found for "${candidate.name}"`);
             }

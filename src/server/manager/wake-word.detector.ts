@@ -52,8 +52,9 @@ export class WakeWordDetector {
       word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     );
     // Build patterns that allow for spaces, commas, or periods between the words
+    // IMPORTANT: Use word boundary (\b) to prevent matching partial words like "the" as "he"
     const wakePatterns = escapedWakeWords.map(word =>
-      word.split(' ').join('[\\s,\\.]*')
+      '\\b' + word.split(' ').join('[\\s,\\.]*') + '\\b'
     );
     // Create a regex that removes everything from the start until (and including) a wake word
     const wakeRegex = new RegExp(`.*?(?:${wakePatterns.join('|')})[\\s,\\.!]*`, 'i');

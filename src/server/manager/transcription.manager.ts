@@ -58,6 +58,10 @@ export class TranscriptionManager {
   private followUpTimeoutId?: NodeJS.Timeout;
   private isEndingFollowUpGracefully: boolean = false; // Guard to prevent double execution
 
+  // Track last processed query to prevent transcript accumulation bug
+  // (backend doesn't properly clear/filter transcripts, so we skip text we've already processed)
+  private lastProcessedQueryText: string = '';
+
   // Extracted managers and services
   private photoManager: PhotoManager;
   private locationService: LocationService;
@@ -179,10 +183,8 @@ export class TranscriptionManager {
       }
     }
 
-    // Request photo when wake word is detected
-    if (!this.photoManager.hasPhoto() && !this.photoManager.isRequesting()) {
-      this.photoManager.requestPhoto();
-    }
+    // Always request a fresh photo when wake word is detected
+    this.photoManager.requestPhoto();
 
     if (!this.isListeningToQuery) {
       // Check for cancellation phrases before starting to listen
@@ -290,8 +292,22 @@ export class TranscriptionManager {
    * User has 5 seconds to speak after the follow-up sound plays
    */
   private async handleFollowUpTranscription(transcriptionData: any): Promise<void> {
-    const text = transcriptionData.text;
+    let text = transcriptionData.text;
     // Note: Already logged in handleTranscription when entering this function
+
+    // CRITICAL: Strip out the last processed query from the transcript text
+    // The backend doesn't properly clear/filter transcripts by startTime, so we get
+    // accumulated text like "Previous query... New query" instead of just "New query"
+    if (this.lastProcessedQueryText && text.startsWith(this.lastProcessedQueryText)) {
+      const newText = text.slice(this.lastProcessedQueryText.length).trim();
+      if (newText.length === 0) {
+        // This is just the old query being echoed back, ignore it
+        console.log(`🔇 [${new Date().toISOString()}] Ignoring echoed previous query in follow-up mode`);
+        return;
+      }
+      console.log(`🔧 [${new Date().toISOString()}] Stripped previous query from transcript: "${text.slice(0, 50)}..." -> "${newText.slice(0, 50)}..."`);
+      text = newText;
+    }
 
     // Cancel the 5-second timeout since user is speaking
     if (this.followUpTimeoutId) {
@@ -334,10 +350,8 @@ export class TranscriptionManager {
       }
     }
 
-    // Request photo for potential vision query
-    if (!this.photoManager.hasPhoto() && !this.photoManager.isRequesting()) {
-      this.photoManager.requestPhoto();
-    }
+    // Always request a fresh photo for potential vision query
+    this.photoManager.requestPhoto();
 
     // Start transcription timer if not already started
     if (this.transcriptionStartTime === 0) {
@@ -498,6 +512,10 @@ export class TranscriptionManager {
     this.isProcessingQuery = true;
     console.log(`🔄 [${new Date().toISOString()}] Processing follow-up query: "${rawText}"`);
 
+    // Store the raw text to prevent it from being re-processed in next follow-up
+    // This is needed because backend doesn't properly clear/filter transcripts
+    this.lastProcessedQueryText = rawText;
+
     try {
       // Remove wake word if user said it anyway (habit)
       const cleanedText = this.wakeWordDetector.removeWakeWord(rawText);
@@ -541,6 +559,7 @@ export class TranscriptionManager {
     this.isInFollowUpMode = false;
     this.photoManager.clearPhoto();
     this.transcriptionStartTime = 0;
+    this.lastProcessedQueryText = ''; // Clear to allow fresh queries
     if (this.timeoutId) {
       clearTimeout(this.timeoutId);
       this.timeoutId = undefined;
@@ -706,6 +725,10 @@ export class TranscriptionManager {
     this.isProcessingQuery = true;
     let shouldEnterFollowUp = true; // Track if we should enter follow-up mode
 
+    // Store the raw text to prevent it from being re-processed in next follow-up
+    // This is needed because backend doesn't properly clear/filter transcripts
+    this.lastProcessedQueryText = rawText;
+
     try {
       const result = await this.queryProcessor.processQuery(rawText, timerDuration, this.transcriptionStartTime);
       // If processQuery returns false, it means the query was cancelled or was an affirmative phrase
@@ -745,7 +768,14 @@ export class TranscriptionManager {
 
       // Start follow-up listening mode ONLY if query was actually processed
       // Skip follow-up for cancellations and affirmative phrases
-      if (this.followUpEnabled && shouldEnterFollowUp) {
+      // IMPORTANT: Force follow-up mode if there's a pending disambiguation (AI asked "which app?")
+      const hasPendingDisambiguation = this.queryProcessor.hasPendingDisambiguation();
+      const shouldStartFollowUp = shouldEnterFollowUp && (this.followUpEnabled || hasPendingDisambiguation);
+
+      if (shouldStartFollowUp) {
+        if (hasPendingDisambiguation && !this.followUpEnabled) {
+          console.log(`🔔 [${new Date().toISOString()}] Forcing follow-up mode for disambiguation response (follow-up normally disabled)`);
+        }
         await this.startFollowUpListening();
       } else {
         // Release processing lock immediately if follow-up is disabled or query was cancelled

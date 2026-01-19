@@ -10,7 +10,8 @@ interface PhotoCache {
 }
 
 /**
- * Manages photo capture and caching for sessions
+ * Manages photo capture for sessions
+ * Always takes a fresh photo for each query - no photo caching between queries
  */
 export class PhotoManager {
   private activePhotos: Map<string, PhotoCache> = new Map();
@@ -24,42 +25,50 @@ export class PhotoManager {
   }
 
   /**
-   * Request a photo for the current session if one isn't already being requested
+   * Request a fresh photo for the current session
+   * Always takes a new photo - no caching of old photos
    */
   requestPhoto(): void {
-    // Only request ONE photo per query - check both activePhotos and isRequestingPhoto flag
-    if (!this.activePhotos.has(this.sessionId) && !this.isRequestingPhoto) {
-      if (this.session.capabilities?.hasCamera) {
-        this.isRequestingPhoto = true;
-        const photoRequestTime = Date.now();
-        console.log(`📸 [${new Date().toISOString()}] Photo requested at timestamp: ${photoRequestTime}`);
+    // Always clear any existing photo and request a fresh one
+    if (this.isRequestingPhoto) {
+      console.log(`📸 [${new Date().toISOString()}] Photo request already in progress, skipping duplicate request`);
+      return;
+    }
 
-        const getPhotoPromise = this.session.camera.requestPhoto({ size: "small" });
+    if (this.session.capabilities?.hasCamera) {
+      // Clear any existing photo first - we always want a fresh one
+      this.activePhotos.delete(this.sessionId);
 
-        getPhotoPromise.then(photoData => {
-          const photoReceivedTime = Date.now();
-          const photoLatency = photoReceivedTime - photoRequestTime;
-          console.log(`📸 [${new Date().toISOString()}] ✅ Photo received! Latency: ${photoLatency}ms (requested: ${photoRequestTime}, received: ${photoReceivedTime})`);
+      this.isRequestingPhoto = true;
+      const photoRequestTime = Date.now();
+      console.log(`📸 [${new Date().toISOString()}] Photo requested at timestamp: ${photoRequestTime}`);
 
-          this.activePhotos.set(this.sessionId, {
-            promise: getPhotoPromise,
-            photoData: photoData,
-            lastPhotoTime: Date.now()
-          });
-        }, error => {
-          console.log(`📸 [${new Date().toISOString()}] ❌ Photo request failed after ${Date.now() - photoRequestTime}ms`);
-          logger.error(error, `[Session ${this.sessionId}]: Error getting photo:`);
-          this.activePhotos.delete(this.sessionId);
-          this.isRequestingPhoto = false;
-        });
+      const getPhotoPromise = this.session.camera.requestPhoto({ size: "small" });
+
+      getPhotoPromise.then(photoData => {
+        const photoReceivedTime = Date.now();
+        const photoLatency = photoReceivedTime - photoRequestTime;
+        console.log(`📸 [${new Date().toISOString()}] ✅ Photo received! Latency: ${photoLatency}ms (requested: ${photoRequestTime}, received: ${photoReceivedTime})`);
 
         this.activePhotos.set(this.sessionId, {
           promise: getPhotoPromise,
-          photoData: null,
-          lastPhotoTime: Date.now(),
-          requestTime: photoRequestTime
+          photoData: photoData,
+          lastPhotoTime: Date.now()
         });
-      }
+        this.isRequestingPhoto = false;
+      }, error => {
+        console.log(`📸 [${new Date().toISOString()}] ❌ Photo request failed after ${Date.now() - photoRequestTime}ms`);
+        logger.error(error, `[Session ${this.sessionId}]: Error getting photo:`);
+        this.activePhotos.delete(this.sessionId);
+        this.isRequestingPhoto = false;
+      });
+
+      this.activePhotos.set(this.sessionId, {
+        promise: getPhotoPromise,
+        photoData: null,
+        lastPhotoTime: Date.now(),
+        requestTime: photoRequestTime
+      });
     }
   }
 
