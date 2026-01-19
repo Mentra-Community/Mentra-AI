@@ -39,17 +39,20 @@ const settingItems: Record<string, SettingItemInfo> = {
     settingName : 'Vision Model',
     description: 'Gemini Flash Latest'
   },
-  response: {
-    settingName : 'Response',
-    description: 'Manage AI Response'
-  },
   darkMode: {
     settingName : 'Theme',
     description: ''
-  },
+  }
+}
+
+const devModeSettingItems: Record<string, SettingItemInfo> = {
   chatHistory: {
     settingName : 'Chat History (Beta)',
     description: 'Saves your conversations to view later'
+  },
+  response: {
+    settingName : 'Response',
+    description: 'Manage AI Response'
   }
 }
 
@@ -271,6 +274,7 @@ function Settings({ onBack, isDarkMode, onToggleDarkMode, userId, onChatHistoryT
           isDarkMode={isDarkMode}
           onToggleDarkMode={onToggleDarkMode}
           onSettingsClick={() => setShowResponseSettings(false)}
+          showBackArrow={true}
         />
 
         {/* Response Settings Page */}
@@ -296,6 +300,7 @@ function Settings({ onBack, isDarkMode, onToggleDarkMode, userId, onChatHistoryT
         isDarkMode={isDarkMode}
         onToggleDarkMode={onToggleDarkMode}
         onSettingsClick={onBack}
+        showBackArrow={true}
       />
 
       {/* Settings Content */}
@@ -319,11 +324,6 @@ function Settings({ onBack, isDarkMode, onToggleDarkMode, userId, onChatHistoryT
             isLastItem={index === Object.values(settingItems).length - 1}
             settingItemName={item.settingName}
             description={item.description}
-            onClick={() => {
-              if (item.settingName === 'Response') {
-                setShowResponseSettings(true);
-              }
-            }}
             customContent={
               item.settingName === 'Theme' ? (
                 <ToggleSwitch
@@ -331,7 +331,26 @@ function Settings({ onBack, isDarkMode, onToggleDarkMode, userId, onChatHistoryT
                   onToggle={handleThemeToggle}
                   label="Theme"
                 />
-              ) : item.settingName === 'Chat History (Beta)' ? (
+              ) : undefined
+            }
+          />
+        ))}
+
+        {/* Dev Mode Settings */}
+        {devModeEnabled && Object.values(devModeSettingItems).map((item, index) => (
+          <SettingItem
+            key={item.settingName}
+            isFirstItem={index === 0}
+            isLastItem={index === Object.values(devModeSettingItems).length - 1}
+            settingItemName={item.settingName}
+            description={item.description}
+            onClick={() => {
+              if (item.settingName === 'Response') {
+                setShowResponseSettings(true);
+              }
+            }}
+            customContent={
+              item.settingName === 'Chat History (Beta)' ? (
                 <SimpleToggle
                   isOn={chatHistoryEnabled}
                   onToggle={handleChatHistoryToggle}
