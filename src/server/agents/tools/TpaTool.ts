@@ -165,14 +165,64 @@ export function compileTool(cloudUrl: string, tpaPackageName: string, tpaTool: T
 }
 
 /**
- * Gets all installed apps for a user and retrieves all tools for each app.
+ * Fetches the list of running apps for a user from the cloud API.
+ *
+ * @param cloudUrl - The base URL of the cloud service
+ * @param userId - The user ID to fetch running apps for
+ * @returns A Set of package names for apps that are currently running
+ */
+async function getRunningAppPackages(cloudUrl: string, userId: string): Promise<Set<string>> {
+  const AUGMENTOS_API_KEY = process.env.AUGMENTOS_API_KEY;
+  const PACKAGE_NAME = process.env.PACKAGE_NAME;
+
+  try {
+    const url = `${cloudUrl}/api/apps?apiKey=${AUGMENTOS_API_KEY}&packageName=${PACKAGE_NAME}&userId=${userId}`;
+    const response = await axios.get(url);
+
+    if (!response.data || !response.data.success) {
+      console.log(`[getRunningAppPackages] Invalid response format, returning empty set`);
+      return new Set();
+    }
+
+    const apps = response.data.data || [];
+    const runningPackages = new Set<string>();
+
+    for (const app of apps) {
+      if (app.is_running) {
+        runningPackages.add(app.packageName);
+      }
+    }
+
+    console.log(`[getRunningAppPackages] Found ${runningPackages.size} running apps: ${Array.from(runningPackages).join(', ')}`);
+    return runningPackages;
+  } catch (error) {
+    console.error(`[getRunningAppPackages] Error fetching running apps:`, error);
+    return new Set();
+  }
+}
+
+/**
+ * Gets all installed apps for a user and retrieves tools only from running apps.
  * This function requires proper authentication to be set up before calling.
  *
- * @returns A promise that resolves to an array of tools from all installed apps
+ * @param cloudUrl - The base URL of the cloud service
+ * @param userId - The user ID to fetch tools for
+ * @param onlyRunningApps - If true, only return tools from apps that are currently running (default: true)
+ * @returns A promise that resolves to an array of tools from running apps
  * @throws Error if authentication fails or if there are issues fetching apps/tools
  */
-export async function getAllToolsForUser(cloudUrl: string, userId: string) {
+export async function getAllToolsForUser(cloudUrl: string, userId: string, onlyRunningApps: boolean = true) {
   try {
+    // First, get the list of running apps if filtering is enabled
+    let runningAppPackages: Set<string> | null = null;
+    if (onlyRunningApps) {
+      runningAppPackages = await getRunningAppPackages(cloudUrl, userId);
+      if (runningAppPackages.size === 0) {
+        console.log(`[getAllToolsForUser] No running apps found for user ${userId}, returning empty tools array`);
+        return [];
+      }
+    }
+
     // Construct the URL to get all tools for the user
     const urlToGetUserTools = `${cloudUrl}/api/tools/users/${userId}/tools`;
 
@@ -181,12 +231,19 @@ export async function getAllToolsForUser(cloudUrl: string, userId: string) {
     const userTools = response.data;
 
     // Log the tools found for the user
-    console.log(`Found ${userTools.length} tools for user ${userId}`);
+    console.log(`Found ${userTools.length} total tools for user ${userId}`);
 
-    // Compile all tools from all the user's installed apps
+    // Filter tools to only include those from running apps
+    const filteredTools = onlyRunningApps && runningAppPackages
+      ? userTools.filter(tool => runningAppPackages!.has(tool.appPackageName))
+      : userTools;
+
+    console.log(`Filtered to ${filteredTools.length} tools from running apps`);
+
+    // Compile all tools from running apps
     const tools: DynamicStructuredTool<any>[] = [];
 
-    for (const toolSchema of userTools) {
+    for (const toolSchema of filteredTools) {
       console.log(`Processing tool: ${toolSchema.id} from app: ${toolSchema.appPackageName}`);
 
       // Compile each tool with its associated package name

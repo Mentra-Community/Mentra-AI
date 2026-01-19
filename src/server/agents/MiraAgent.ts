@@ -9,8 +9,9 @@ import { wrapText } from "../utils";
 import { AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
 import { Tool, StructuredTool } from "langchain/tools";
-import { TpaCommandsTool, TpaListAppsTool } from "./tools/TpaCommandsTool";
+import { TpaCommandsTool, TpaListAppsTool, TpaListAppsWithToolsTool } from "./tools/TpaCommandsTool";
 import { SmartAppControlTool } from "./tools/SmartAppControlTool";
+import { TpaToolInvokeTool } from "./tools/TpaToolInvokeTool";
 import { AppManagementAgent } from "./AppManagementAgent";
 
 import { ThinkingTool } from "./tools/ThinkingTool";
@@ -100,6 +101,10 @@ export class MiraAgent implements Agent {
       // Keep these for backward compatibility or advanced use cases
       new TpaListAppsTool(cloudUrl, userId),
       new TpaCommandsTool(cloudUrl, userId),
+      // Tool to list apps with their tools and parameter requirements
+      new TpaListAppsWithToolsTool(cloudUrl, userId),
+      // Tool to invoke TPA tools (e.g., add_reminder, take_note on Mentra Notes)
+      new TpaToolInvokeTool(cloudUrl, userId),
 
       new ThinkingTool(),
       new Calculator(),
@@ -274,6 +279,45 @@ export class MiraAgent implements Agent {
   }
 
   /**
+   * Get information about available tools for the AppToolQueryDecider
+   * Returns tool name, description, and activation phrases
+   */
+  public getToolInfo(): Array<{ name: string; description: string; activationPhrases?: string[] }> {
+    return this.agentTools.map(tool => {
+      // Extract activation phrases from description if present
+      // Tools compiled from TPA have "Possibly activated by phrases like: ..." appended
+      let activationPhrases: string[] | undefined;
+      const phrasesMatch = tool.description.match(/Possibly activated by phrases like: (.+)$/);
+      if (phrasesMatch) {
+        activationPhrases = phrasesMatch[1].split(', ').map(p => p.trim());
+      }
+
+      return {
+        name: tool.name,
+        description: tool.description.replace(/\nPossibly activated by phrases like: .+$/, '').trim(),
+        activationPhrases
+      };
+    });
+  }
+
+  /**
+   * Get only the built-in tools (not TPA tools)
+   * Used when useMinimalTools is true to speed up non-tool queries
+   */
+  private getBuiltInTools(): (Tool | StructuredTool)[] {
+    const builtInToolNames = [
+      'Search_Engine',
+      'SmartAppControl',
+      'TPA_ListApps',
+      'TPA_Commands',
+      'TPA_InvokeTool',  // For invoking TPA tools like add_reminder, take_note
+      'Internal_Thinking',
+      'calculator'  // LangChain Calculator
+    ];
+    return this.agentTools.filter(tool => builtInToolNames.includes(tool.name));
+  }
+
+  /**
    * Classifies query complexity to determine appropriate response mode
    * Uses heuristics and pattern matching for fast classification
    *
@@ -342,6 +386,29 @@ export class MiraAgent implements Agent {
   }
 
   /**
+   * Check if a query is asking about "current state" that needs fresh data from tools
+   * These queries should NOT use conversation history because the state may have changed
+   */
+  private isCurrentStateQuery(query: string): boolean {
+    const queryLower = query.toLowerCase();
+    const currentStatePatterns = [
+      /what apps? (am i|are|is) running/i,        // "what app am I running" or "what apps are running"
+      /which apps? (am i|are|is) running/i,       // "which app am I running" or "which apps are running"
+      /what am i running/i,                        // "what am I running" (without "apps")
+      /what('s| is| are) running (right )?now/i,
+      /which apps? are (running|active|open|on)/i,
+      /list (my |the )?(running |active )?(apps?|applications?)/i,
+      /show (me )?(my |the )?(running |active )?(apps?|applications?)/i,
+      /what (apps?|applications?) (do i have |are |is )(running|active|open|on)/i,
+      /are there any apps? running/i,
+      /is .+ (app )?(running|active|open|on)( right now)?/i,
+      /what('s| is) (currently )?running/i,
+      /get (me )?(the |my )?(current |running |active )?(apps?|app list)/i,
+    ];
+    return currentStatePatterns.some(pattern => pattern.test(queryLower));
+  }
+
+  /**
    * Detects if the current query is related to recent conversation history
    * Uses the LLM to determine if this is a follow-up question
    */
@@ -379,9 +446,15 @@ export class MiraAgent implements Agent {
     if (isVisionQuery) {
       console.log('[MiraAgent] ✅ Vision query detected - treating as independent query to get fresh photo');
       return false;
-    } else {
-      console.log('[MiraAgent] ❌ No vision keywords detected, checking LLM for follow-up detection...');
     }
+
+    // Check if this is a "current state" query that needs fresh data from tools
+    if (this.isCurrentStateQuery(query)) {
+      console.log('[MiraAgent] ✅ Current state query detected - treating as independent query to get fresh data');
+      return false;
+    }
+
+    console.log('[MiraAgent] ❌ No vision/current-state keywords detected, checking LLM for follow-up detection...');
 
     // Get the most recent conversation turn
     const recentTurn = this.conversationHistory[this.conversationHistory.length - 1];
@@ -404,15 +477,21 @@ Assistant: "${recentTurn.response}"
 Current query: "${query}"
 
 Determine if the current query is a follow-up that references or relates to the previous conversation.
-Follow-up indicators include:
+
+Follow-up indicators (answer YES):
 - Pronouns referring to previous content (it, that, those, this, them, he, she, they)
-- Temporal references (yesterday, today, tomorrow, later, earlier, before, after, now, then)
 - Continuation words (also, too, as well, and, additionally, furthermore)
 - Questions about "what about", "how about"
 - Implicit context that only makes sense with previous conversation
 - References to entities or topics from the previous exchange
 
-Answer with ONLY "YES" if it's a follow-up question that needs context from the previous conversation, or "NO" if it's an independent query.`;
+NOT a follow-up (answer NO):
+- CURRENT STATE queries asking about live/real-time status: "what am I running", "what apps are running", "what's running now", "which apps are active"
+- Even if the user asked the SAME question before, if it's asking about CURRENT STATE, it needs FRESH data, not cached conversation
+- The user asking "what am I running?" twice means they want the CURRENT answer both times, not a reference to the previous answer
+- Queries that need real-time/live data from tools should always be treated as independent
+
+Answer with ONLY "YES" if it's a follow-up that needs context from the previous conversation, or "NO" if it's an independent query (including current state queries).`;
 
     try {
       const result = await llm.invoke([new HumanMessage(detectionPrompt)]);
@@ -575,6 +654,7 @@ Answer with ONLY "YES" if it's a follow-up question that needs context from the 
   /**
    * Runs the text-based agent reasoning loop (without image)
    * Returns the answer and whether camera is needed
+   * @param useMinimalTools - If true, only use built-in tools (not TPA tools) for faster responses
    */
   private async runTextBasedAgent(
     query: string,
@@ -583,7 +663,8 @@ Answer with ONLY "YES" if it's a follow-up question that needs context from the 
     localtimeContext: string,
     hasPhoto: boolean,
     responseMode: ResponseMode = ResponseMode.QUICK,
-    hasDisplay: boolean = false
+    hasDisplay: boolean = false,
+    useMinimalTools: boolean = false
   ): Promise<{ answer: string; needsCamera: boolean }> {
     // Get configuration for the selected response mode based on device type
     const configSet = hasDisplay ? DISPLAY_RESPONSE_CONFIGS : CAMERA_RESPONSE_CONFIGS;
@@ -591,14 +672,24 @@ Answer with ONLY "YES" if it's a follow-up question that needs context from the 
     const deviceType = hasDisplay ? 'DISPLAY' : 'CAMERA';
     console.log(`[Response Mode] Using ${deviceType} ${responseMode.toUpperCase()} mode (${config.wordLimit} words, ${config.maxTokens} tokens)`);
 
-    const llm = LLMProvider.getLLM(config.maxTokens).bindTools(this.agentTools);
-    const toolNames = this.agentTools.map((tool) => tool.name + ": " + tool.description || "");
+    // Select tools based on useMinimalTools flag
+    const toolsToUse = useMinimalTools ? this.getBuiltInTools() : this.agentTools;
+    console.log(`[Tools] Using ${useMinimalTools ? 'MINIMAL' : 'FULL'} tools (${toolsToUse.length} tools)`);
+
+    const llm = LLMProvider.getLLM(config.maxTokens).bindTools(toolsToUse);
+    const toolNames = toolsToUse.map((tool) => tool.name + ": " + tool.description || "");
 
     const photoContext = hasPhoto
       ? "IMPORTANT: Your role is to classify the query and determine if it requires visual input. For the 'Needs Camera' flag: set it to TRUE if the query requires visual input from the camera (e.g., 'what is this?', 'how many fingers?', 'what color?', 'describe what you see', 'read this'). Set it to FALSE for general knowledge queries (e.g., 'weather', 'time', 'calculations', 'facts'). If Needs Camera is TRUE, provide a brief acknowledgment as your Final Answer (e.g., 'I can't access the camera at this moment.') - the image analysis will provide the detailed response."
       : "";
 
-    const conversationHistoryText = this.formatConversationHistory();
+    // Skip conversation history for "current state" queries that need fresh data from tools
+    // This forces the LLM to call tools like TPA_ListApps instead of trusting stale history
+    const skipHistory = this.isCurrentStateQuery(query);
+    const conversationHistoryText = skipHistory ? '' : this.formatConversationHistory();
+    if (skipHistory) {
+      console.log(`📚 [ConversationHistory] SKIPPED - current state query needs fresh tool data`);
+    }
 
     // Add personality-specific mandatory requirements to response instructions
     let personalityInstructions = '';
@@ -652,7 +743,7 @@ Answer with ONLY "YES" if it's a follow-up question that needs context from the 
 
       if (result.tool_calls) {
         for (const toolCall of result.tool_calls) {
-          const selectedTool = this.agentTools.find(tool => tool.name === toolCall.name);
+          const selectedTool = toolsToUse.find(tool => tool.name === toolCall.name);
           if (selectedTool) {
             let toolInput: any;
             if (selectedTool instanceof StructuredTool) {
@@ -855,13 +946,14 @@ Answer with ONLY "YES" if it's a follow-up question that needs context from the 
       console.log(`⏱️  [+${Date.now() - startTime}ms] 🔍 Classifying query complexity...`);
       // Check if this is display glasses - if so, force QUICK mode
       const hasDisplay = userContext.hasDisplay === true;
+      const useMinimalTools = userContext.useMinimalTools === true;
       const responseMode = this.classifyQueryComplexity(query, hasDisplay);
-      console.log(`⏱️  [+${Date.now() - startTime}ms] ✅ Response mode selected: ${responseMode.toUpperCase()} (hasDisplay: ${hasDisplay})`);
+      console.log(`⏱️  [+${Date.now() - startTime}ms] ✅ Response mode selected: ${responseMode.toUpperCase()} (hasDisplay: ${hasDisplay}, useMinimalTools: ${useMinimalTools})`);
 
       // STEP 2: Run text-based agent with appropriate response mode
       console.log(`⏱️  [+${Date.now() - startTime}ms] 🚀 Running text-based classifier...`);
       const textClassifierStart = Date.now();
-      const textResult = await this.runTextBasedAgent(query, locationInfo, notificationsContext, localtimeContext, !!photo || !!getPhotoCallback, responseMode, hasDisplay);
+      const textResult = await this.runTextBasedAgent(query, locationInfo, notificationsContext, localtimeContext, !!photo || !!getPhotoCallback, responseMode, hasDisplay, useMinimalTools);
       console.log(`⏱️  [+${Date.now() - startTime}ms] ✅ Text classifier complete (took ${Date.now() - textClassifierStart}ms)`);
       console.log(`🤖 Camera needed:`, textResult.needsCamera);
       console.log(`🤖 Text answer:`, textResult.answer);

@@ -22,6 +22,28 @@ interface AppInfo {
   is_foreground?: boolean;
 }
 
+interface ToolParameter {
+  name: string;
+  type: string;
+  description?: string;
+  required?: boolean;
+}
+
+interface AppTool {
+  id: string;
+  description: string;
+  activationPhrases?: string[];
+  parameters?: Record<string, ToolParameter> | ToolParameter[];
+}
+
+interface AppWithTools {
+  packageName: string;
+  name: string;
+  description: string;
+  is_running: boolean;
+  tools: AppTool[];
+}
+
 const TpaCommandsInputSchema = z.object({
   action: z.enum(['start', 'stop']).describe("The action to perform: 'start' or 'stop'"),
   packageName: z.string().describe("The exact package name of the app to start or stop")
@@ -33,7 +55,7 @@ const TpaListAppsInputSchema = z.object({
 
 export class TpaListAppsTool extends StructuredTool {
   name = 'TPA_ListApps';
-  description = 'List all available apps with their package names, names, descriptions, and running status. Use this tool when you need to find the correct package name for an app before using TPA_Commands.';
+  description = 'List all available apps with their package names, names, descriptions, and running status. ALWAYS use this tool FIRST before TPA_Commands to find the correct package name. Match the user\'s request to an app name in the list. If no app matches, tell the user the app was not found - do NOT guess or suggest similar apps.';
   schema = TpaListAppsInputSchema;
   
   private userId: string;
@@ -126,7 +148,7 @@ export class TpaListAppsTool extends StructuredTool {
 
 export class TpaCommandsTool extends StructuredTool {
   name = 'TPA_Commands';
-  description = 'Start or stop apps on smart glasses by providing the exact package name. Use this tool when you know the exact package name of the app to start or stop.';
+  description = 'Start or stop apps on smart glasses. IMPORTANT: You MUST use TPA_ListApps first to get the exact package name. Only call this tool with a package name that exists in the TPA_ListApps response. Never guess package names.';
   schema = TpaCommandsInputSchema;
   
   private userId: string;
@@ -153,8 +175,8 @@ export class TpaCommandsTool extends StructuredTool {
 
   private async executeCommand(action: string, packageName: string): Promise<string> {
     try {
-      // Use the correct API endpoint from the routes file
-      const url = `${this.cloudUrl}/api/apps/${packageName}/${action}?apiKey=${AUGMENTOS_API_KEY}&packageName=${PACKAGE_NAME}&userId=${this.userId}`;
+      // Use the miniapps API endpoint with API key auth
+      const url = `${this.cloudUrl}/api/miniapps/${packageName}/${action}?apiKey=${AUGMENTOS_API_KEY}&packageName=${PACKAGE_NAME}&userId=${this.userId}`;
       console.log(`[TPA_Commands] Executing command: ${action} for package: ${packageName}`);
       console.log(`[TPA_Commands] Request URL:`, url);
       const response = await axios.post(url);
@@ -176,6 +198,106 @@ export class TpaCommandsTool extends StructuredTool {
       return `Unknown error while trying to ${action} app: ${error}`;
     }
   }
+}
 
- 
+const TpaListAppsWithToolsInputSchema = z.object({
+  onlyRunning: z.boolean().optional().describe("If true, only return apps that are currently running (default: true)")
+});
+
+/**
+ * Tool that lists apps along with their available tools and parameter requirements.
+ * This helps the LLM understand what tools are available and what parameters they need.
+ */
+export class TpaListAppsWithToolsTool extends StructuredTool {
+  name = 'TPA_ListAppsWithTools';
+  description = `List all apps with their available tools and required parameters.
+Use this BEFORE calling TPA_InvokeTool to understand what tools are available and what parameters they need.
+
+Returns apps with their tools in this format:
+- packageName: The app's package name (use this for TPA_InvokeTool)
+- name: Human-readable app name
+- tools: Array of available tools with:
+  - id: The tool ID to use with TPA_InvokeTool
+  - description: What the tool does
+  - parameters: Required/optional parameters for the tool
+
+IMPORTANT: Check the 'parameters' field of each tool to know what parameters are required!`;
+
+  schema = TpaListAppsWithToolsInputSchema;
+
+  private userId: string;
+  private cloudUrl: string;
+
+  constructor(cloudUrl: string, userId: string) {
+    super();
+    this.cloudUrl = cloudUrl;
+    this.userId = userId;
+  }
+
+  async _call(input: { onlyRunning?: boolean }): Promise<string> {
+    const onlyRunning = input.onlyRunning !== false; // Default to true
+    console.log(`[TPA_ListAppsWithTools] Fetching apps with tools (onlyRunning: ${onlyRunning})`);
+
+    try {
+      const url = `${this.cloudUrl}/api/apps?apiKey=${AUGMENTOS_API_KEY}&packageName=${PACKAGE_NAME}&userId=${this.userId}`;
+      const response = await axios.get(url);
+
+      if (!response.data || !response.data.success) {
+        return 'Error: Failed to fetch apps';
+      }
+
+      const apps = response.data.data || [];
+
+      // Filter and format apps with their tools
+      const appsWithTools: AppWithTools[] = apps
+        .filter((app: any) => !onlyRunning || app.is_running)
+        .filter((app: any) => app.tools && app.tools.length > 0)
+        .map((app: any) => ({
+          packageName: app.packageName,
+          name: app.name,
+          description: app.description || '',
+          is_running: !!app.is_running,
+          tools: (app.tools || []).map((tool: any) => ({
+            id: tool.id,
+            description: tool.description || '',
+            activationPhrases: tool.activationPhrases || [],
+            parameters: tool.parameters || {}
+          }))
+        }));
+
+      if (appsWithTools.length === 0) {
+        return onlyRunning
+          ? 'No running apps with tools found. Start an app first using SmartAppControl.'
+          : 'No apps with tools found.';
+      }
+
+      // Format output for LLM readability
+      const formattedOutput = appsWithTools.map(app => {
+        const toolsInfo = app.tools.map(tool => {
+          let paramInfo = 'No parameters required';
+          if (tool.parameters && Object.keys(tool.parameters).length > 0) {
+            // Handle both object and array formats for parameters
+            if (Array.isArray(tool.parameters)) {
+              paramInfo = `Parameters: ${JSON.stringify(tool.parameters)}`;
+            } else {
+              paramInfo = `Parameters: ${JSON.stringify(tool.parameters)}`;
+            }
+          }
+          return `  - ${tool.id}: ${tool.description}\n    ${paramInfo}`;
+        }).join('\n');
+
+        return `📱 ${app.name} (${app.packageName}) ${app.is_running ? '[RUNNING]' : ''}\n${toolsInfo}`;
+      }).join('\n\n');
+
+      console.log(`[TPA_ListAppsWithTools] Found ${appsWithTools.length} apps with tools`);
+      return formattedOutput;
+
+    } catch (error) {
+      console.error('[TPA_ListAppsWithTools] Error:', error);
+      if (axios.isAxiosError(error)) {
+        return `Error fetching apps: ${error.response?.data?.message || error.message}`;
+      }
+      return `Error fetching apps: ${error}`;
+    }
+  }
 }

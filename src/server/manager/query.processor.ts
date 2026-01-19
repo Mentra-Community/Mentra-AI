@@ -8,6 +8,7 @@ import { MiraAgent, CameraQuestionAgent } from '../agents';
 import { wrapText, getCancellationDecider } from '../utils';
 import { getVisionQueryDecider, VisionQueryDecider, VisionDecision } from '../utils/vision-query-decider';
 import { getRecallMemoryDecider, RecallMemoryDecider, RecallDecision } from '../utils/recall-memory-decider';
+import { getAppToolQueryDecider, AppToolQueryDecider, AppToolDecision } from '../utils/app-tool-query-decider';
 import { ChatManager } from './chat.manager';
 import { PhotoManager } from './photo.manager';
 import { AudioPlaybackManager } from './audio-playback.manager';
@@ -55,6 +56,7 @@ export class QueryProcessor {
   private currentQueryMessageId?: string;
   private visionQueryDecider: VisionQueryDecider;
   private recallMemoryDecider: RecallMemoryDecider;
+  private appToolQueryDecider: AppToolQueryDecider;
   private onRequestClarification?: () => void;
   private pendingClarification: PendingClarification | null = null;
 
@@ -71,6 +73,7 @@ export class QueryProcessor {
     this.wakeWordDetector = config.wakeWordDetector;
     this.visionQueryDecider = getVisionQueryDecider();
     this.recallMemoryDecider = getRecallMemoryDecider();
+    this.appToolQueryDecider = getAppToolQueryDecider();
     this.onRequestClarification = config.onRequestClarification;
   }
 
@@ -152,7 +155,7 @@ export class QueryProcessor {
       return false;
     }
 
-    // Check if this is a clarification response to a pending query
+    // Check if this is a clarification response to a pending vision query
     if (this.pendingClarification) {
       await this.handleClarificationResponse(query);
       return false; // Clarification responses should NOT enter follow-up mode (they're just yes/no answers)
@@ -249,7 +252,13 @@ export class QueryProcessor {
         let enhancedQuery = query;
         if (fullHistory.length > 0) {
           const contextSummary = fullHistory
-            .map((turn, idx) => `[${idx + 1}] User asked: "${turn.query}" -> You answered: "${turn.response}"`)
+            .map((turn, idx) => {
+              const isLast = idx === fullHistory.length - 1;
+              const prefix = isLast
+                ? `[${idx + 1}] (MOST RECENT - REPEAT THIS ONE IF USER SAYS "REPEAT THAT")`
+                : `[${idx + 1}]`;
+              return `${prefix} User asked: "${turn.query}" -> You answered: "${turn.response}"`;
+            })
             .join('\n');
           enhancedQuery = `${query}\n\n[IMPORTANT - MEMORY RECALL: The user is asking you to recall/repeat information from our previous conversation. You MUST extract the relevant information from the conversation history below and provide it in your response. Do NOT just say "that's the summary" - actually repeat the specific details they're asking about.]\n\n[CONTEXT FROM PREVIOUS EXCHANGES:\n${contextSummary}]`;
           console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📚 Injected ${fullHistory.length} conversation turns into query`);
@@ -268,9 +277,25 @@ export class QueryProcessor {
         return true; // Memory recall completed successfully
       }
 
-      // Detect vision queries using AI decider (YES/NO/UNSURE)
-      const visionDecision = await this.visionQueryDecider.checkIfNeedsCamera(query, conversationHistory);
-      console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 🤖 Vision decision: ${visionDecision}`);
+      // Check if this is an app tool query (AI-powered with available tools context)
+      const availableTools = this.miraAgent.getToolInfo();
+      const appToolDecision = await this.appToolQueryDecider.checkIfNeedsAppTool(query, availableTools, conversationHistory);
+      console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 🔧 App tool decision: ${appToolDecision}`);
+
+      // Determine if we should use minimal tools (for non-app-tool queries)
+      // UNSURE is treated as APP_TOOL - use full tools and let the AI decide
+      const useMinimalTools = appToolDecision === AppToolDecision.NO_TOOL;
+
+      // Skip vision check if this is clearly an app tool query
+      // APP_TOOL queries are for tools like "what apps am I running", not vision queries
+      let visionDecision = VisionDecision.NO;
+      if (appToolDecision !== AppToolDecision.APP_TOOL) {
+        // Detect vision queries using AI decider (YES/NO/UNSURE)
+        visionDecision = await this.visionQueryDecider.checkIfNeedsCamera(query, conversationHistory);
+        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 🤖 Vision decision: ${visionDecision}`);
+      } else {
+        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 🤖 Vision decision: SKIPPED (APP_TOOL query)`);
+      }
 
       // Handle UNSURE case - ask user for clarification
       if (visionDecision === VisionDecision.UNSURE && this.onRequestClarification) {
@@ -321,7 +346,7 @@ export class QueryProcessor {
       };
 
       const hasDisplay = this.session.capabilities?.hasDisplay;
-      const inputData = { query, photo, getPhotoCallback, hasDisplay };
+      const inputData = { query, photo, getPhotoCallback, hasDisplay, useMinimalTools };
 
       // Route to appropriate agent based on query type
       let agentResponse: any;

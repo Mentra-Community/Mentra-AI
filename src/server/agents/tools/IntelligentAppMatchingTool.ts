@@ -25,7 +25,20 @@ Your task is to:
    - Common alternative names or abbreviations
    - Fuzzy matching for typos or similar sounding names
 
-Respond with a JSON object with this exact format:
+IMPORTANT - Disambiguation Required:
+If multiple apps have very similar names (e.g., same base name with variants like "[Dev]", "[Test]", "[Dev Aryan]", etc.), you MUST return a disambiguation response so the user can choose.
+
+When disambiguation is needed, return:
+{
+  "needsDisambiguation": true,
+  "candidates": [
+    { "packageName": "com.example.app", "name": "App Name", "description": "..." },
+    { "packageName": "com.example.app.dev", "name": "App Name [Dev]", "description": "..." }
+  ],
+  "reasoning": "Multiple apps with similar names found"
+}
+
+When a single clear match is found, respond with:
 {
   "packageName": "the.exact.package.name",
   "name": "App Name",

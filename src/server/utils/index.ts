@@ -5,3 +5,4 @@ export * from  '../manager/llm.manager';
 export * from './db.util';
 export * from './prompt.util';
 export * from './cancellation-decider';
+export * from './app-tool-query-decider';

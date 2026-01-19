@@ -46,6 +46,14 @@ export class SmartAppControlTool extends StructuredTool {
         return "Sorry, I had trouble finding the app you mentioned.";
       }
 
+      // Handle disambiguation case - multiple similar apps found
+      if (appMatch.needsDisambiguation && appMatch.candidates?.length > 0) {
+        const options = appMatch.candidates
+          .map((c: any) => `'${c.name}'`)
+          .join(' or ');
+        return `I found multiple apps with similar names. Which one would you like: ${options}?`;
+      }
+
       // Check if we found a reasonable match
       if (!appMatch.packageName || appMatch.confidence === 'low') {
         if (appMatch.reasoning && appMatch.reasoning.includes("No suitable app found")) {

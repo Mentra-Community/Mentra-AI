@@ -50,6 +50,7 @@ DOES NOT NEED MEMORY RECALL (respond "CONTINUE"):
 - "tell me more" without clear reference to conversation (ambiguous, continue)
 - ACTION REQUESTS that build on previous topics: "make it longer", "give me more", "do it again but with X", "let's make it 100", "now do X" = CONTINUE (these are NEW requests, not asking to recall info)
 - Follow-up requests to expand/modify: "can you add more?", "make it bigger", "try another one", "give me 100 digits" = CONTINUE
+- CURRENT STATE queries that need FRESH/LIVE data: "what apps am I running", "which apps are active", "what's running right now", "list my running apps" = CONTINUE (even if we discussed apps before, they want CURRENT state, not memory)
 
 IMPORTANT CONTEXT CLUES:
 - "previously", "earlier", "before" + conversation verb (asked, said, mentioned, discussed) = RECALL
@@ -153,6 +154,29 @@ export class RecallMemoryDecider {
       if (pattern.test(queryLower)) {
         console.log(`🧠 RecallMemoryDecider: "${query}" -> VISION_RETRY (fast check: vision retry pattern detected)`);
         return RecallDecision.VISION_RETRY;
+      }
+    }
+
+    // CURRENT STATE queries - these need FRESH data, NOT memory recall
+    // Even if we talked about apps before, asking "what apps are running NOW" needs live data
+    const currentStatePatterns = [
+      /what apps? (am i|are|is) running/i,        // "what app am I running" or "what apps are running"
+      /which apps? (am i|are|is) running/i,       // "which app am I running" or "which apps are running"
+      /what('s| is| are) running (right )?now/i,
+      /which apps? are (running|active|open|on)/i,
+      /list (my |the )?(running |active )?(apps?|applications?)/i,
+      /show (me )?(my |the )?(running |active )?(apps?|applications?)/i,
+      /what (apps?|applications?) (do i have |are |is )(running|active|open|on)/i,
+      /are there any apps? running/i,
+      /is .+ (app )?(running|active|open|on)( right now)?/i,
+      /what('s| is) (currently )?running/i,
+      /get (me )?(the |my )?(current |running |active )?(apps?|app list)/i,
+    ];
+
+    for (const pattern of currentStatePatterns) {
+      if (pattern.test(queryLower)) {
+        console.log(`🧠 RecallMemoryDecider: "${query}" -> CONTINUE (fast check: current state query - needs fresh data)`);
+        return RecallDecision.CONTINUE;
       }
     }
 
