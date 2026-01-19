@@ -1,7 +1,7 @@
 /**
- * Weather API Integration using Open-Meteo (Free, no API key required)
+ * Weather API Integration using Google Weather API
  * Provides accurate real-time weather data for any location
- * API Docs: https://open-meteo.com/en/docs
+ * API Docs: https://developers.google.com/maps/documentation/weather
  */
 
 /**
@@ -27,44 +27,6 @@ export interface WeatherResponse {
 }
 
 /**
- * WMO Weather interpretation codes to human-readable conditions
- * https://open-meteo.com/en/docs#weathervariables
- */
-function getWeatherCondition(code: number): string {
-  const conditions: Record<number, string> = {
-    0: 'Clear sky',
-    1: 'Mainly clear',
-    2: 'Partly cloudy',
-    3: 'Overcast',
-    45: 'Foggy',
-    48: 'Depositing rime fog',
-    51: 'Light drizzle',
-    53: 'Moderate drizzle',
-    55: 'Dense drizzle',
-    56: 'Light freezing drizzle',
-    57: 'Dense freezing drizzle',
-    61: 'Slight rain',
-    63: 'Moderate rain',
-    65: 'Heavy rain',
-    66: 'Light freezing rain',
-    67: 'Heavy freezing rain',
-    71: 'Slight snow',
-    73: 'Moderate snow',
-    75: 'Heavy snow',
-    77: 'Snow grains',
-    80: 'Slight rain showers',
-    81: 'Moderate rain showers',
-    82: 'Violent rain showers',
-    85: 'Slight snow showers',
-    86: 'Heavy snow showers',
-    95: 'Thunderstorm',
-    96: 'Thunderstorm with slight hail',
-    99: 'Thunderstorm with heavy hail',
-  };
-  return conditions[code] || 'Unknown';
-}
-
-/**
  * Convert Celsius to Fahrenheit
  */
 function celsiusToFahrenheit(c: number): number {
@@ -81,8 +43,35 @@ function getWindDirection(degrees: number): string {
 }
 
 /**
- * Get weather data for a location using Open-Meteo API
- * This is a free API with no key required and accurate real-time data
+ * Weather cache to avoid hitting API on every prompt
+ */
+interface WeatherCache {
+  data: WeatherResponse;
+  timestamp: number;
+  lat: number;
+  lng: number;
+}
+
+let weatherCache: WeatherCache | null = null;
+const CACHE_DURATION_MS = 10 * 60 * 1000; // 10 minutes
+const LOCATION_THRESHOLD = 0.01; // ~1km difference triggers new fetch
+
+/**
+ * Check if cached weather is still valid
+ */
+function isCacheValid(lat: number, lng: number): boolean {
+  if (!weatherCache) return false;
+
+  const now = Date.now();
+  const isExpired = (now - weatherCache.timestamp) > CACHE_DURATION_MS;
+  const locationChanged = Math.abs(weatherCache.lat - lat) > LOCATION_THRESHOLD ||
+                          Math.abs(weatherCache.lng - lng) > LOCATION_THRESHOLD;
+
+  return !isExpired && !locationChanged;
+}
+
+/**
+ * Get weather data for a location using Google Weather API
  *
  * @param lat - Latitude
  * @param lng - Longitude
@@ -95,19 +84,29 @@ export async function getWeather(
   locationName?: string
 ): Promise<WeatherResponse> {
   try {
-    console.log(`[Weather] Fetching weather from Open-Meteo for: ${locationName || `${lat}, ${lng}`}`);
+    // Check cache first
+    if (isCacheValid(lat, lng)) {
+      console.log(`[Weather] 📦 CACHED - Using cached weather data (${Math.round((Date.now() - weatherCache!.timestamp) / 1000)}s old)`);
+      return weatherCache!.data;
+    }
 
-    // Open-Meteo API - free, no key required
-    // Request current weather with all relevant fields
-    const url = new URL('https://api.open-meteo.com/v1/forecast');
-    url.searchParams.set('latitude', lat.toString());
-    url.searchParams.set('longitude', lng.toString());
-    url.searchParams.set('current', 'temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,wind_direction_10m,precipitation');
-    url.searchParams.set('temperature_unit', 'celsius');
-    url.searchParams.set('wind_speed_unit', 'mph');
-    url.searchParams.set('timezone', 'auto');
+    console.log(`[Weather] 🌐 FETCHING FROM API - ${!weatherCache ? 'No cache exists' : 'Cache expired or location changed'}`);
 
-    const response = await fetch(url.toString(), {
+    const apiKey = process.env.GOOGLE_WEATHER_API_KEY;
+
+    if (!apiKey) {
+      console.error('[Weather] GOOGLE_WEATHER_API_KEY is not configured');
+      return {
+        success: false,
+        error: 'Weather API key is not configured'
+      };
+    }
+
+    console.log(`[Weather] Fetching weather from Google Weather API for: ${locationName || `${lat}, ${lng}`}`);
+
+    const url = `https://weather.googleapis.com/v1/currentConditions:lookup?key=${apiKey}&location.latitude=${lat}&location.longitude=${lng}`;
+
+    const response = await fetch(url, {
       method: 'GET',
       headers: {
         'Accept': 'application/json',
@@ -115,7 +114,8 @@ export async function getWeather(
     });
 
     if (!response.ok) {
-      console.warn(`[Weather] Open-Meteo API responded with status ${response.status}`);
+      const errorText = await response.text();
+      console.warn(`[Weather] Google Weather API responded with status ${response.status}: ${errorText}`);
       return {
         success: false,
         error: `API error: ${response.status}`
@@ -124,38 +124,41 @@ export async function getWeather(
 
     const data = await response.json();
 
-    if (!data.current) {
-      return {
-        success: false,
-        error: 'No current weather data available'
-      };
-    }
-
-    const current = data.current;
-    const tempCelsius = Math.round(current.temperature_2m);
-    const tempFahrenheit = celsiusToFahrenheit(current.temperature_2m);
-    const condition = getWeatherCondition(current.weather_code);
-    const humidity = current.relative_humidity_2m;
-    const windSpeed = Math.round(current.wind_speed_10m);
-    const windDir = getWindDirection(current.wind_direction_10m);
-    const precipitation = current.precipitation;
+    // Google Weather API response structure
+    const tempCelsius = Math.round(data.temperature?.degrees ?? 0);
+    const tempFahrenheit = celsiusToFahrenheit(tempCelsius);
+    const condition = data.condition?.description || 'Unknown';
+    const humidity = data.humidity;
+    const windSpeed = data.wind?.speed?.value ? Math.round(data.wind.speed.value * 2.237) : undefined; // Convert m/s to mph
+    const windDir = data.wind?.direction?.degrees ? getWindDirection(data.wind.direction.degrees) : undefined;
+    const precipitation = data.precipitation?.probability?.percent;
 
     const weatherCondition: WeatherCondition = {
       temperature: tempFahrenheit,
       temperatureCelsius: tempCelsius,
       condition: condition,
       humidity: humidity,
-      wind: `${windSpeed} mph ${windDir}`,
-      precipitation: precipitation > 0 ? `${precipitation} mm` : undefined,
+      wind: windSpeed && windDir ? `${windSpeed} mph ${windDir}` : undefined,
+      precipitation: precipitation ? `${precipitation}% chance` : undefined,
     };
 
     console.log(`[Weather] Success: ${tempFahrenheit}°F (${tempCelsius}°C), ${condition}, Humidity: ${humidity}%, Wind: ${windSpeed} mph ${windDir}`);
 
-    return {
+    const result: WeatherResponse = {
       success: true,
       location: locationName,
       current: weatherCondition,
     };
+
+    // Update cache
+    weatherCache = {
+      data: result,
+      timestamp: Date.now(),
+      lat,
+      lng,
+    };
+
+    return result;
 
   } catch (error) {
     console.error('[Weather] Error fetching weather:', error);
