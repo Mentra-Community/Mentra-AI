@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Sparkles, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Lottie from 'lottie-react';
-import Sidebar from '../components/Sidebar';
 import MentraLogoAnimation from '../../public/figma-parth-assets/anim/Mentralogo2.json';
 import MiraBackground from '../../public/figma-parth-assets/anim/Mira-Background.json';
 import { MiraBackgroundAnimation } from '../components/MiraBackgroundAnimation';
@@ -10,6 +9,7 @@ import ColorMiraLogo from '../../public/figma-parth-assets/icons/color-mira-logo
 import Settings from './Settings';
 import Header from '../components/Header';
 import BottomHeader from '../components/BottomHeader';
+import FolderNav from './FolderNav';
 
 
 
@@ -56,8 +56,6 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
     thinkingWords[Math.floor(Math.random() * thinkingWords.length)]
   );
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
-  // const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
   const [imageScale, setImageScale] = useState(1);
   const [imagePosition, setImagePosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
@@ -67,7 +65,7 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
     const saved = localStorage.getItem('mira-dark-mode');
     return saved ? JSON.parse(saved) : false;
   });
-  const [currentPage, setCurrentPage] = useState<'chat' | 'settings'>('chat');
+  const [currentPage, setCurrentPage] = useState<'chat' | 'settings' | 'folders'>('chat');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const sseRef = useRef<EventSource | null>(null);
 
@@ -242,7 +240,7 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
   }, [userId, recipientId]);
 
 
-  // Render Settings page if on settings, otherwise render chat
+  // Render Settings page if on settings
   if (currentPage === 'settings') {
     return (
       <Settings
@@ -254,33 +252,58 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
     );
   }
 
+  // Slide animation variants
+  const slideVariants = {
+    folderNav: {
+      x: currentPage === 'folders' ? 0 : '-100%',
+    },
+    chat: {
+      x: currentPage === 'folders' ? '100%' : 0,
+    },
+  };
+
   return (
     <div className={`h-screen flex overflow-hidden ${isDarkMode ? 'dark' : ''}`} style={{ backgroundColor: 'var(--background)' }}>
-      {/* Sidebar */}
-      {/* <Sidebar
-        isOpen={sidebarOpen}
-        onClose={() => setSidebarOpen(false)}
-        isDarkMode={isDarkMode}
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
-      /> */}
+      {/* FolderNav - slides in from left */}
+      <motion.div
+        className="absolute inset-0 z-20"
+        initial={{ x: '-100%' }}
+        animate={slideVariants.folderNav}
+        transition={{ type: 'tween', duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
+        style={{ backgroundColor: 'var(--background)' }}
+      >
+        <FolderNav
+          isDarkMode={isDarkMode}
+          onChatSelect={(chatId) => {
+            console.log('Selected chat:', chatId);
+            setCurrentPage('chat');
+          }}
+          onNewChat={() => {
+            setCurrentPage('chat');
+          }}
+          onBack={() => {
+            setCurrentPage('chat');
+          }}
+        />
+      </motion.div>
 
-      {/* Overlay for mobile */}
-      {/* {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/80 z-40 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        ></div>
-      )} */}
-
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col relative" style={{ backgroundColor: 'var(--background)' }}>
+      {/* Main Chat Content - slides out to right */}
+      <motion.div
+        className="flex-1 flex flex-col relative"
+        initial={{ x: 0 }}
+        animate={slideVariants.chat}
+        transition={{ type: 'tween', duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
+        style={{ backgroundColor: 'var(--background)' }}
+      >
         {/* Header */}
         <Header
           isDarkMode={isDarkMode}
           onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
           onSettingsClick={() => {
             setCurrentPage('settings');
+          }}
+          onMenuClick={() => {
+            setCurrentPage('folders');
           }}
         />
 
@@ -467,7 +490,7 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
         {/* Bottom Header */}
         <BottomHeader isDarkMode={isDarkMode} isVisible={messages.length > 0} />
 
-      </div>
+      </motion.div>
 
       {/* Image Zoom Modal */}
       {zoomedImage && (
