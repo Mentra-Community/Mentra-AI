@@ -40,7 +40,7 @@ const userSettingsSchema = new Schema<IUserSettings>(
     },
     followUpEnabled: {
       type: Boolean,
-      default: true,
+      default: false,
     },
     chatHistoryEnabled: {
       type: Boolean,

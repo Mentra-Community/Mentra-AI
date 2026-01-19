@@ -183,10 +183,10 @@ export class TranscriptionManager {
       }
     }
 
-    // Always request a fresh photo when wake word is detected
-    this.photoManager.requestPhoto();
-
     if (!this.isListeningToQuery) {
+      // Request a fresh photo ONLY when we first detect the wake word (start of query)
+      // This prevents taking multiple photos during the same query
+      this.photoManager.requestPhoto();
       // Check for cancellation phrases before starting to listen
       const queryAfterWakeWord = this.wakeWordDetector.removeWakeWord(text).trim();
       const cancellationCheck = this.cancellationDecider.checkIfWantsToCancel(queryAfterWakeWord);
@@ -350,11 +350,11 @@ export class TranscriptionManager {
       }
     }
 
-    // Always request a fresh photo for potential vision query
-    this.photoManager.requestPhoto();
-
     // Start transcription timer if not already started
+    // Request photo ONLY at the start of a new follow-up query (not on every transcription)
     if (this.transcriptionStartTime === 0) {
+      // Request a fresh photo for potential vision query
+      this.photoManager.requestPhoto();
       this.transcriptionStartTime = Date.now();
       console.log(`⏱️  [${new Date().toISOString()}] 🎙️ Started follow-up transcription at: ${this.transcriptionStartTime}`);
     }
@@ -523,6 +523,15 @@ export class TranscriptionManager {
     } catch (error) {
       logger.error(error, `[Session ${this.sessionId}]: Error in processFollowUpQuery:`);
     } finally {
+      // Check if we're waiting for clarification FIRST before resetting any state
+      // If waiting for clarification, skip all state resets and don't start follow-up mode
+      if (this.isWaitingForClarification) {
+        console.log(`🔓 [${new Date().toISOString()}] Skipping state reset - waiting for clarification response`);
+        // Don't reset state or start follow-up mode, the clarification listener will handle it
+        this.isProcessingQuery = false;
+        return;
+      }
+
       // Reset state after follow-up query
       console.log(`⏱️  [${new Date().toISOString()}] 🧹 Resetting state after follow-up query`);
       this.transcriptionStartTime = 0;
