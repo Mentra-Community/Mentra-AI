@@ -7,7 +7,8 @@ import { useHandGesture } from '../tools/handGestures';
 import SettingItem from '../ui/setting-item';
 import ResponseSetting from './response.setting';
 import ToggleSwitch from '../ui/toggle-switch';
-import { updateTheme } from '../api/settings.api';
+import SimpleToggle from '../ui/simple-toggle';
+import { updateTheme, updateChatHistoryEnabled, fetchUserSettings } from '../api/settings.api';
 
 interface TranscriptionEntry {
   id: string;
@@ -21,6 +22,7 @@ interface SettingsProps {
   isDarkMode: boolean;
   onToggleDarkMode: () => void;
   userId: string;
+  onChatHistoryToggle?: (enabled: boolean) => void;
 }
 
 interface SettingItemInfo {
@@ -44,6 +46,10 @@ const settingItems: Record<string, SettingItemInfo> = {
   darkMode: {
     settingName : 'Theme',
     description: ''
+  },
+  chatHistory: {
+    settingName : 'Chat History (Beta)',
+    description: 'Saves your conversations to view later'
   }
 }
 
@@ -119,7 +125,7 @@ const useTranscriptionStream = (userId: string) => {
  * Settings page component
  * Displays settings options and allows navigation back to chat
  */
-function Settings({ onBack, isDarkMode, onToggleDarkMode, userId }: SettingsProps): React.JSX.Element {
+function Settings({ onBack, isDarkMode, onToggleDarkMode, userId, onChatHistoryToggle }: SettingsProps): React.JSX.Element {
   const gestureAreaRef = useRef<HTMLDivElement>(null);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const transcriptionScrollRef = useRef<HTMLDivElement>(null);
@@ -129,8 +135,46 @@ function Settings({ onBack, isDarkMode, onToggleDarkMode, userId }: SettingsProp
     const saved = localStorage.getItem('mira-dev-mode');
     return saved ? JSON.parse(saved) : false;
   });
+  const [chatHistoryEnabled, setChatHistoryEnabled] = useState(false);
+  const [isLoadingSettings, setIsLoadingSettings] = useState(true);
   const { toastState, showToast, hideToast } = useToast();
 
+  // Fetch user settings on mount to get chatHistoryEnabled state
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const settings = await fetchUserSettings(userId);
+        setChatHistoryEnabled(settings.chatHistoryEnabled ?? false);
+      } catch (error) {
+        console.error('Failed to load settings:', error);
+      } finally {
+        setIsLoadingSettings(false);
+      }
+    };
+    loadSettings();
+  }, [userId]);
+
+  // Handle chat history toggle and sync with backend
+  const handleChatHistoryToggle = async () => {
+    const newValue = !chatHistoryEnabled;
+
+    // Optimistically update UI
+    setChatHistoryEnabled(newValue);
+
+    // Sync with backend
+    try {
+      await updateChatHistoryEnabled(userId, newValue);
+      console.log('✅ Chat history setting synced to backend:', newValue);
+      showToast(newValue ? 'Chat history enabled' : 'Chat history disabled', 'success');
+      // Notify parent component of the change
+      onChatHistoryToggle?.(newValue);
+    } catch (error) {
+      console.error('Failed to update chat history setting:', error);
+      showToast('Failed to save chat history preference', 'error');
+      // Revert on failure
+      setChatHistoryEnabled(!newValue);
+    }
+  };
 
   // Handle theme toggle and sync with backend
   const handleThemeToggle = async () => {
@@ -280,13 +324,21 @@ function Settings({ onBack, isDarkMode, onToggleDarkMode, userId }: SettingsProp
                 setShowResponseSettings(true);
               }
             }}
-            customContent={item.settingName === 'Theme' ? (
-              <ToggleSwitch
-                isOn={isDarkMode}
-                onToggle={handleThemeToggle}
-                label="Theme"
-              />
-            ) : undefined}
+            customContent={
+              item.settingName === 'Theme' ? (
+                <ToggleSwitch
+                  isOn={isDarkMode}
+                  onToggle={handleThemeToggle}
+                  label="Theme"
+                />
+              ) : item.settingName === 'Chat History (Beta)' ? (
+                <SimpleToggle
+                  isOn={chatHistoryEnabled}
+                  onToggle={handleChatHistoryToggle}
+                  label="Chat History"
+                />
+              ) : undefined
+            }
           />
         ))}
 

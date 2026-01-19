@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import PersonalityButton from '../ui/personality-button'
 import SettingItem from '../ui/setting-item'
-import ToggleSwitch from '../ui/toggle-switch'
+import SimpleToggle from '../ui/simple-toggle'
 import { Sparkles, Briefcase, Heart, Lightbulb, Palette, Zap, LucideIcon } from 'lucide-react'
 import { fetchUserSettings, updatePersonality, updateFollowUpEnabled } from '../api/settings.api'
 
@@ -127,7 +127,7 @@ function ResponseSetting({ userId, showToast }: ResponseSettingProps) {
           settingItemName="Follow-up"
           description="Enable contextual follow-ups"
           customContent={
-            <ToggleSwitch
+            <SimpleToggle
               isOn={followUpEnabled}
               onToggle={handleFollowUpToggle}
               label="Follow-up"

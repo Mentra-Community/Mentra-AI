@@ -22,6 +22,7 @@ import { SSEManager, createTranscriptionBroadcaster } from './manager/sse.manage
 import { TranscriptionManager, getCleanServerUrl } from './manager/transcription.manager';
 import { notificationsManager } from './manager/notifications.manager';
 import { createTranscriptionStream } from '@mentra/sdk';
+import { UserSettings } from './schemas';
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 80;
 const PACKAGE_NAME = process.env.PACKAGE_NAME;
@@ -139,6 +140,14 @@ class MiraServer extends AppServer {
       // Continue even if settings initialization fails
     }
 
+    // Initialize today's conversation (creates new one only if doesn't exist for today)
+    try {
+      await this.dbAPI.initializeTodayConversation(userId);
+    } catch (error) {
+      logger.error(error as Error, `Failed to initialize conversation for user ${userId}:`);
+      // Continue even if conversation initialization fails
+    }
+
     const cleanServerUrl = getCleanServerUrl(session.getServerUrl());
 
     // Reuse existing agent for this user or create a new one
@@ -167,9 +176,26 @@ class MiraServer extends AppServer {
     // Create broadcast function for transcription SSE
     const broadcastTranscription = createTranscriptionBroadcaster(this.transcriptionSSEManager, userId);
 
+    // Create callback to save conversation turns to the database (only if chat history is enabled)
+    const onConversationTurn = async (query: string, response: string, photoTimestamp?: number) => {
+      try {
+        // Check if chat history is enabled for this user
+        const settings = await UserSettings.findOne({ userId });
+        if (!settings?.chatHistoryEnabled) {
+          logger.debug({ userId }, 'Chat history disabled, skipping conversation save');
+          return;
+        }
+
+        await this.dbAPI.addMessageToConversation(userId, 'user', query, photoTimestamp);
+        await this.dbAPI.addMessageToConversation(userId, 'assistant', response);
+      } catch (error) {
+        logger.error(error as Error, `Failed to save conversation turn for user ${userId}:`);
+      }
+    };
+
     // Create a transcription manager for this session — this is what essentially connects the user's session input to the backend.
     const transcriptionManager = new TranscriptionManager(
-      session, sessionId, userId, agent, cleanServerUrl, this.chatManager, broadcastTranscription
+      session, sessionId, userId, agent, cleanServerUrl, this.chatManager, broadcastTranscription, onConversationTurn
     );
     this.transcriptionManagers.set(sessionId, transcriptionManager);
     this.userIdToSessionId.set(userId, sessionId); // Track userId -> sessionId mapping

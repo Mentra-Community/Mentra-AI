@@ -7,6 +7,7 @@ export interface IUserSettings extends Document {
   personality: 'default' | 'professional' | 'friendly' | 'candid' | 'quirky' | 'efficient';
   theme: 'light' | 'dark';
   followUpEnabled: boolean;
+  chatHistoryEnabled: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -40,6 +41,10 @@ const userSettingsSchema = new Schema<IUserSettings>(
     followUpEnabled: {
       type: Boolean,
       default: true,
+    },
+    chatHistoryEnabled: {
+      type: Boolean,
+      default: false,
     },
   },
   {

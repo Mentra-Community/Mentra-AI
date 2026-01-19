@@ -1,5 +1,6 @@
 import { logger as _logger } from '@mentra/sdk';
 import { reverseGeocode, getTimezone } from '../utils/map.util';
+import { getWeather, WeatherCondition } from '../utils/weather.util';
 
 const logger = _logger.child({ service: 'LocationService' });
 
@@ -20,6 +21,7 @@ export interface LocationContext {
   };
   streetAddress?: string;
   neighborhood?: string;
+  weather?: WeatherCondition;
 }
 
 /**
@@ -77,7 +79,10 @@ export class LocationService {
       // Get timezone information
       await this.enrichWithTimezone(lat, lng, locationInfo);
 
-      logger.debug(`User location: ${locationInfo.city}, ${locationInfo.state}, ${locationInfo.country} (${locationInfo.lat}, ${locationInfo.lng}), Timezone: ${locationInfo.timezone.name}`);
+      // Get weather information
+      await this.enrichWithWeather(lat, lng, locationInfo);
+
+      logger.debug(`User location: ${locationInfo.city}, ${locationInfo.state}, ${locationInfo.country} (${locationInfo.lat}, ${locationInfo.lng}), Timezone: ${locationInfo.timezone.name}, Weather: ${locationInfo.weather?.condition || 'Unknown'}`);
 
       return locationInfo;
     } catch (error) {
@@ -201,6 +206,30 @@ export class LocationService {
       } catch (googleTimezoneError) {
         console.warn('[Geocoding] Google Maps timezone lookup failed:', googleTimezoneError);
       }
+    }
+  }
+
+  /**
+   * Enrich location with weather data
+   */
+  private async enrichWithWeather(lat: number, lng: number, locationInfo: LocationContext): Promise<void> {
+    try {
+      // Build location name for better weather results
+      const locationName = locationInfo.city !== 'Unknown'
+        ? `${locationInfo.city}, ${locationInfo.state}`
+        : undefined;
+
+      console.log(`[Weather] Fetching weather for ${locationName || `${lat}, ${lng}`}`);
+      const weatherResult = await getWeather(lat, lng, locationName);
+
+      if (weatherResult.success && weatherResult.current) {
+        locationInfo.weather = weatherResult.current;
+        console.log(`[Weather] Success: ${weatherResult.current.temperature}°F, ${weatherResult.current.condition}`);
+      } else {
+        console.warn(`[Weather] Failed to fetch weather: ${weatherResult.error}`);
+      }
+    } catch (weatherError) {
+      console.warn('[Weather] Weather lookup failed:', weatherError);
     }
   }
 }

@@ -74,7 +74,8 @@ export class TranscriptionManager {
     miraAgent: MiraAgent,
     serverUrl: string,
     chatManager?: ChatManager,
-    broadcastTranscription?: (text: string, isFinal: boolean) => void
+    broadcastTranscription?: (text: string, isFinal: boolean) => void,
+    onConversationTurn?: (query: string, response: string, photoTimestamp?: number) => void
   ) {
     this.session = session;
     this.sessionId = sessionId;
@@ -101,6 +102,7 @@ export class TranscriptionManager {
       audioManager: this.audioManager,
       wakeWordDetector: this.wakeWordDetector,
       onRequestClarification: () => this.startClarificationListening(),
+      onConversationTurn,
     });
 
     // Use same settings as LiveCaptions for now

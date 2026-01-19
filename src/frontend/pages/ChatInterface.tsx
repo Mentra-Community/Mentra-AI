@@ -10,6 +10,7 @@ import Settings from './Settings';
 import Header from '../components/Header';
 import BottomHeader from '../components/BottomHeader';
 import FolderNav from './FolderNav';
+import { fetchUserSettings } from '../api/settings.api';
 
 
 
@@ -21,6 +22,27 @@ interface Message {
   content: string;
   timestamp: Date;
   image?: string;
+}
+
+// Conversation message from API (stored in database)
+interface ConversationMessage {
+  id: string;
+  messageNumber: number;
+  role: 'user' | 'assistant';
+  content: string;
+  photoTimestamp?: number;
+  timestamp: string;
+}
+
+interface Conversation {
+  _id: string;
+  userId: string;
+  date: string;
+  title: string;
+  messages: ConversationMessage[];
+  hasUnread: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface ChatInterfaceProps {
@@ -56,6 +78,8 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
     thinkingWords[Math.floor(Math.random() * thinkingWords.length)]
   );
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
+  const [selectedChatDate, setSelectedChatDate] = useState<string | null>(null); // null = today's live chat
+  const [isLoadingConversation, setIsLoadingConversation] = useState(false);
   const [imageScale, setImageScale] = useState(1);
   const [imagePosition, setImagePosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
@@ -65,6 +89,7 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
     const saved = localStorage.getItem('mira-dark-mode');
     return saved ? JSON.parse(saved) : false;
   });
+  const [chatHistoryEnabled, setChatHistoryEnabled] = useState(false);
   const [currentPage, setCurrentPage] = useState<'chat' | 'settings' | 'folders'>('chat');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const sseRef = useRef<EventSource | null>(null);
@@ -86,6 +111,63 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
         container.scrollTo({ top: targetPosition, behavior: 'smooth' });
       }
     }, 100);
+  };
+
+  // Get today's date in YYYY-MM-DD format
+  const getTodayDate = () => {
+    return new Date().toISOString().split('T')[0];
+  };
+
+  // Convert conversation messages to UI message format
+  const convertConversationToMessages = (conversationMessages: ConversationMessage[]): Message[] => {
+    return conversationMessages.map(msg => ({
+      id: msg.id,
+      senderId: msg.role === 'user' ? userId : recipientId,
+      recipientId: msg.role === 'user' ? recipientId : userId,
+      content: msg.content,
+      timestamp: new Date(msg.timestamp),
+      image: undefined, // Photos are not stored, only timestamps
+    }));
+  };
+
+  // Load conversation by date from the API
+  const loadConversation = async (date: string) => {
+    setIsLoadingConversation(true);
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const backendUrl = isDev ? 'http://localhost:3002' : '';
+
+    try {
+      const response = await fetch(
+        `${backendUrl}/api/db/conversations/${date}?userId=${encodeURIComponent(userId)}`
+      );
+
+      if (response.ok) {
+        const conversation: Conversation = await response.json();
+        const convertedMessages = convertConversationToMessages(conversation.messages);
+        setMessages(convertedMessages);
+        console.log(`[ChatInterface] Loaded ${convertedMessages.length} messages for date ${date}`);
+      } else if (response.status === 404) {
+        // No conversation for this date
+        setMessages([]);
+        console.log(`[ChatInterface] No conversation found for date ${date}`);
+      } else {
+        console.error('[ChatInterface] Failed to load conversation:', response.statusText);
+      }
+    } catch (error) {
+      console.error('[ChatInterface] Error loading conversation:', error);
+    } finally {
+      setIsLoadingConversation(false);
+    }
+  };
+
+  // Handle chat selection from FolderNav
+  const handleChatSelect = (date: string) => {
+    console.log('[ChatInterface] Selected chat date:', date);
+    setSelectedChatDate(date);
+    setCurrentPage('chat');
+
+    // Load the selected conversation
+    loadConversation(date);
   };
 
   useEffect(() => {
@@ -110,6 +192,28 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
       document.documentElement.classList.remove('dark');
     }
   }, [isDarkMode]);
+
+  // Load user settings and today's conversation on mount
+  useEffect(() => {
+    if (userId) {
+      // Fetch user settings to check if chat history is enabled
+      fetchUserSettings(userId)
+        .then(settings => {
+          setChatHistoryEnabled(settings.chatHistoryEnabled ?? false);
+          console.log('[ChatInterface] Chat history enabled:', settings.chatHistoryEnabled);
+
+          // Only load conversation if chat history is enabled
+          if (settings.chatHistoryEnabled) {
+            const today = getTodayDate();
+            console.log('[ChatInterface] Loading today\'s conversation:', today);
+            loadConversation(today);
+          }
+        })
+        .catch(error => {
+          console.error('[ChatInterface] Failed to fetch user settings:', error);
+        });
+    }
+  }, [userId]);
 
   // Set up SSE connection for real-time updates
   useEffect(() => {
@@ -151,7 +255,11 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
             (data.senderId === userId && data.recipientId === recipientId) ||
             (data.senderId === recipientId && data.recipientId === userId);
 
-          if (isRelevant) {
+          // Only add real-time messages if viewing today's chat (not historical)
+          const today = new Date().toISOString().split('T')[0];
+          const isViewingToday = !selectedChatDate || selectedChatDate === today;
+
+          if (isRelevant && isViewingToday) {
             // If it's a message FROM the user (not from Mira), show processing indicator
             if (data.senderId === userId) {
               const randomWord = thinkingWords[Math.floor(Math.random() * thinkingWords.length)];
@@ -174,6 +282,8 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
               console.log('[ChatInterface] Updated messages array:', newMessages);
               return newMessages;
             });
+          } else if (!isViewingToday) {
+            console.log('[ChatInterface] Ignoring real-time message while viewing historical chat');
           } else {
             console.log('[ChatInterface] Ignoring message from different conversation');
           }
@@ -248,6 +358,7 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
         isDarkMode={isDarkMode}
         onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
         userId={userId}
+        onChatHistoryToggle={(enabled) => setChatHistoryEnabled(enabled)}
       />
     );
   }
@@ -274,13 +385,9 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
       >
         <FolderNav
           isDarkMode={isDarkMode}
-          onChatSelect={(chatId) => {
-            console.log('Selected chat:', chatId);
-            setCurrentPage('chat');
-          }}
-          onNewChat={() => {
-            setCurrentPage('chat');
-          }}
+          userId={userId}
+          currentChatDate={selectedChatDate || getTodayDate()}
+          onChatSelect={handleChatSelect}
           onBack={() => {
             setCurrentPage('chat');
           }}
@@ -305,6 +412,7 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
           onMenuClick={() => {
             setCurrentPage('folders');
           }}
+          showMenuButton={chatHistoryEnabled}
         />
 
         {/* Main Content Area */}
@@ -322,9 +430,9 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
                 <MiraBackgroundAnimation />
               </div>
 
-          {/* Welcome Screen - Shows centered when no messages */}
+          {/* Welcome Screen - Shows centered when no messages or loading */}
           <AnimatePresence mode="wait">
-            {messages.length === 0 && (
+            {(messages.length === 0 || isLoadingConversation) && (
               <motion.div
                 key="welcome-screen"
                 initial={{ opacity: 0 }}
@@ -393,7 +501,7 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
           </AnimatePresence>
 
           {/* Chat Messages - Fades in when messages appear */}
-          {messages.length > 0 && (
+          {messages.length > 0 && !isLoadingConversation && (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}

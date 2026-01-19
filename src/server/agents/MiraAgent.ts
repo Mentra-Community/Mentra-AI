@@ -72,6 +72,13 @@ export class MiraAgent implements Agent {
       offsetSec: number;
       isDst: boolean;
     };
+    weather?: {
+      temperature: number;
+      temperatureCelsius: number;
+      condition: string;
+      humidity?: number;
+      wind?: string;
+    };
   } = {
     city: 'Unknown',
     state: 'Unknown',
@@ -86,7 +93,8 @@ export class MiraAgent implements Agent {
       fullName: 'Unknown',
       offsetSec: 0,
       isDst: false
-    }
+    },
+    weather: undefined
   };
 
   constructor(cloudUrl: string, userId: string) {
@@ -590,7 +598,8 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
           fullName: preserveKnownValue(locationInfo?.timezone?.fullName, this.locationContext?.timezone?.fullName, 'Unknown', isStringUnknown),
           offsetSec: preserveKnownValue(locationInfo?.timezone?.offsetSec, this.locationContext?.timezone?.offsetSec, 0, isNumberUnknown),
           isDst: typeof locationInfo?.timezone?.isDst === 'boolean' ? locationInfo.timezone.isDst : (this.locationContext?.timezone?.isDst || false)
-        }
+        },
+        weather: (locationInfo as any)?.weather || this.locationContext?.weather
       };
 
       this.locationContext = safeLocationInfo;
@@ -921,6 +930,19 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
 
         if (locationParts.length > 0) {
           locationInfo = `For context the User is currently ${locationParts.join(', ')}.\n\n`;
+        }
+
+        // Add weather context if available
+        if (this.locationContext.weather) {
+          const weather = this.locationContext.weather;
+          let weatherInfo = `Current weather: ${weather.temperature}°F (${weather.temperatureCelsius}°C), ${weather.condition}`;
+          if (weather.humidity) {
+            weatherInfo += `, ${weather.humidity}% humidity`;
+          }
+          if (weather.wind) {
+            weatherInfo += `, wind ${weather.wind}`;
+          }
+          locationInfo += `${weatherInfo}.\n\n`;
         }
       }
 

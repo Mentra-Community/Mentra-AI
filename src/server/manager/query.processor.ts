@@ -28,6 +28,7 @@ interface QueryProcessorConfig {
   audioManager: AudioPlaybackManager;
   wakeWordDetector: WakeWordDetector;
   onRequestClarification?: () => void; // Callback to trigger new listening session
+  onConversationTurn?: (query: string, response: string, photoTimestamp?: number) => void; // Callback to save conversation turn
 }
 
 /**
@@ -58,6 +59,7 @@ export class QueryProcessor {
   private recallMemoryDecider: RecallMemoryDecider;
   private appToolQueryDecider: AppToolQueryDecider;
   private onRequestClarification?: () => void;
+  private onConversationTurn?: (query: string, response: string, photoTimestamp?: number) => void;
   private pendingClarification: PendingClarification | null = null;
 
   constructor(config: QueryProcessorConfig) {
@@ -75,6 +77,7 @@ export class QueryProcessor {
     this.recallMemoryDecider = getRecallMemoryDecider();
     this.appToolQueryDecider = getAppToolQueryDecider();
     this.onRequestClarification = config.onRequestClarification;
+    this.onConversationTurn = config.onConversationTurn;
   }
 
   /**
@@ -656,6 +659,14 @@ export class QueryProcessor {
         await this.audioManager.showOrSpeakText(finalAnswer);
 
         console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ✅ Response sent and audio completed`);
+
+        // Save conversation turn to database (if callback is set)
+        if (this.onConversationTurn) {
+          // Get photo timestamp if camera was used
+          const photoTimestamp = needsCamera && photo ? Date.now() : undefined;
+          this.onConversationTurn(query, finalAnswer, photoTimestamp);
+          console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 💾 Conversation turn saved to database`);
+        }
       }
     }
   }

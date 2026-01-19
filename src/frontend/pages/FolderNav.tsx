@@ -1,46 +1,75 @@
-import React, { useState } from 'react';
-import { Search, ChevronRight, MessageSquare, X } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Search, ChevronRight, MessageSquare, X, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ColorMiraLogo from '../../public/figma-parth-assets/icons/color-mira-logo.svg';
 
-interface ChatHistoryItem {
-  id: string;
-  title: string;
-  timestamp: Date;
-  hasUnread?: boolean;
+// Conversation from API
+interface Conversation {
+  _id: string;
+  userId: string;
+  date: string; // YYYY-MM-DD format - acts as the "folder"
+  title: string; // e.g., "January 18, 2026"
+  messages: Array<{
+    id: string;
+    messageNumber: number;
+    role: 'user' | 'assistant';
+    content: string;
+    photoTimestamp?: number;
+    timestamp: string;
+  }>;
+  hasUnread: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface FolderNavProps {
   isDarkMode: boolean;
-  onChatSelect?: (chatId: string) => void;
+  userId: string;
+  onChatSelect?: (date: string) => void;
   onNewChat?: () => void;
   onBack?: () => void;
-  currentChatId?: string;
+  currentChatDate?: string;
 }
 
-// Mock data for demonstration - replace with actual data from API
-const mockChatHistory: ChatHistoryItem[] = [
-  { id: '1', title: 'Grammar Fix Request', timestamp: new Date('2026-01-18T10:00:00') },
-  { id: '2', title: 'AI Stack Excitement Responses', timestamp: new Date('2026-01-17T15:30:00') },
-  { id: '3', title: 'Clarifying Commonwealth Connection', timestamp: new Date('2026-01-17T12:00:00') },
-  { id: '4', title: 'Stomach Issues Message', timestamp: new Date('2026-01-16T09:00:00') },
-  { id: '5', title: 'Amazon Prescription Process', timestamp: new Date('2026-01-15T14:00:00') },
-  { id: '6', title: 'Handwritten Notes Transcription', timestamp: new Date('2026-01-14T11:00:00') },
-  { id: '7', title: 'Count letters in strawberry', timestamp: new Date('2026-01-13T16:00:00') },
-  { id: '8', title: 'Count letters in strawberry', timestamp: new Date('2026-01-12T10:00:00') },
-  { id: '9', title: 'Warhammer locations USA', timestamp: new Date('2026-01-11T08:00:00'), hasUnread: true },
-  { id: '10', title: 'AI-Driven Engineer Productivity', timestamp: new Date('2026-01-10T13:00:00') },
-  { id: '11', title: 'Bluetooth Audio Issue', timestamp: new Date('2026-01-09T17:00:00') },
-  { id: '12', title: 'Apple Cinema Ticket Refund', timestamp: new Date('2026-01-08T09:30:00') },
-];
-
-export default function FolderNav({ isDarkMode, onChatSelect, onBack, currentChatId }: FolderNavProps) {
+export default function FolderNav({ isDarkMode, userId, onChatSelect, onBack, currentChatDate }: FolderNavProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
-  const [chatHistory] = useState<ChatHistoryItem[]>(mockChatHistory);
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const filteredChats = chatHistory.filter(chat =>
-    chat.title.toLowerCase().includes(searchQuery.toLowerCase())
+  // Fetch conversations from API
+  useEffect(() => {
+    const fetchConversations = async () => {
+      if (!userId) return;
+
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const response = await fetch(`/api/db/conversations?userId=${encodeURIComponent(userId)}`);
+        if (!response.ok) {
+          throw new Error('Failed to fetch conversations');
+        }
+        const data = await response.json();
+        setConversations(data);
+      } catch (err) {
+        console.error('Error fetching conversations:', err);
+        setError('Failed to load conversations');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchConversations();
+  }, [userId]);
+
+  // Filter conversations by title or message content
+  const filteredChats = conversations.filter(conversation =>
+    conversation.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    conversation.messages.some(msg =>
+      msg.content.toLowerCase().includes(searchQuery.toLowerCase())
+    )
   );
 
   // Format relative time
@@ -140,7 +169,18 @@ export default function FolderNav({ isDarkMode, onChatSelect, onBack, currentCha
           }}
         >
           <AnimatePresence mode="popLayout">
-            {filteredChats.length === 0 ? (
+            {isLoading ? (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className={`text-center py-8 ${
+                  isDarkMode ? 'text-gray-500' : 'text-gray-400'
+                }`}
+              >
+                <Loader2 className="w-8 h-8 mx-auto mb-2 animate-spin opacity-50" />
+                <p className="text-sm">Loading chats...</p>
+              </motion.div>
+            ) : error ? (
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -149,20 +189,31 @@ export default function FolderNav({ isDarkMode, onChatSelect, onBack, currentCha
                 }`}
               >
                 <MessageSquare className="w-10 h-10 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">No chats found</p>
+                <p className="text-sm">{error}</p>
+              </motion.div>
+            ) : filteredChats.length === 0 ? (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className={`text-center py-8 ${
+                  isDarkMode ? 'text-gray-500' : 'text-gray-400'
+                }`}
+              >
+                <MessageSquare className="w-10 h-10 mx-auto mb-2 opacity-50" />
+                <p className="text-sm">{searchQuery ? 'No chats found' : 'No conversations yet'}</p>
               </motion.div>
             ) : (
-              filteredChats.map((chat, index) => (
+              filteredChats.map((conversation, index) => (
                 <motion.button
-                  key={chat.id}
+                  key={conversation.date}
                   layout
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95 }}
                   transition={{ delay: index * 0.02 }}
-                  onClick={() => onChatSelect?.(chat.id)}
+                  onClick={() => onChatSelect?.(conversation.date)}
                   className={`w-full text-left px-3 py-3 rounded-xl mb-1 transition-colors flex items-start gap-3 group ${
-                    currentChatId === chat.id
+                    currentChatDate === conversation.date
                       ? isDarkMode
                         ? 'bg-white/10'
                         : 'bg-black/10'
@@ -186,16 +237,16 @@ export default function FolderNav({ isDarkMode, onChatSelect, onBack, currentCha
                       <span className={`text-[15px] font-medium truncate ${
                         isDarkMode ? 'text-white' : 'text-gray-900'
                       }`}>
-                        {chat.title}
+                        {conversation.title}
                       </span>
-                      {chat.hasUnread && (
+                      {conversation.hasUnread && (
                         <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0" />
                       )}
                     </div>
                     <span className={`text-xs ${
                       isDarkMode ? 'text-gray-500' : 'text-gray-400'
                     }`}>
-                      {getRelativeTime(chat.timestamp)}
+                      {getRelativeTime(new Date(conversation.updatedAt))}
                     </span>
                   </div>
                 </motion.button>

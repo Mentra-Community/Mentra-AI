@@ -9,6 +9,7 @@ export interface UserSettings {
   personality: 'default' | 'professional' | 'friendly' | 'candid' | 'quirky' | 'efficient';
   theme: 'light' | 'dark';
   followUpEnabled: boolean;
+  chatHistoryEnabled: boolean;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -106,6 +107,27 @@ export const updateFollowUpEnabled = async (
 
   if (!response.ok) {
     throw new Error('Failed to update follow-up setting');
+  }
+
+  return response.json();
+};
+
+/**
+ * Update only the chatHistoryEnabled setting
+ */
+export const updateChatHistoryEnabled = async (
+  userId: string,
+  chatHistoryEnabled: boolean
+): Promise<UserSettings> => {
+  const apiUrl = getApiUrl();
+  const response = await fetch(`${apiUrl}/api/db/settings/chat-history`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, chatHistoryEnabled }),
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to update chat history setting');
   }
 
   return response.json();

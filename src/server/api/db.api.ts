@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { UserSettings, IUserSettings } from '../schemas';
+import { UserSettings, IUserSettings, Conversation, IConversation } from '../schemas';
 import { logger as _logger } from '@mentra/sdk';
 
 const logger = _logger.child({ service: 'DatabaseAPI' });
@@ -11,6 +11,7 @@ const DEFAULT_USER_SETTINGS = {
   personality: 'default' as const,
   theme: 'light' as const,
   followUpEnabled: true,
+  chatHistoryEnabled: false, // Beta feature - disabled by default
 };
 
 /**
@@ -288,6 +289,51 @@ export class DatabaseAPI {
   }
 
   /**
+   * PATCH /api/db/settings/chat-history
+   * Update only the chatHistoryEnabled setting
+   */
+  async updateChatHistoryEnabled(req: Request, res: Response): Promise<void> {
+    try {
+      const { userId, chatHistoryEnabled } = req.body;
+
+      if (!userId || chatHistoryEnabled === undefined) {
+        res.status(400).json({ error: 'userId and chatHistoryEnabled are required' });
+        return;
+      }
+
+      if (typeof chatHistoryEnabled !== 'boolean') {
+        res.status(400).json({ error: 'chatHistoryEnabled must be a boolean' });
+        return;
+      }
+
+      let settings = await UserSettings.findOne({ userId });
+
+      if (!settings) {
+        // Create with defaults and the specified chatHistoryEnabled value
+        settings = await UserSettings.create({
+          userId,
+          ...DEFAULT_USER_SETTINGS,
+          chatHistoryEnabled,
+        });
+        logger.info({ userId, chatHistoryEnabled }, 'Created new user settings with chatHistoryEnabled');
+      } else {
+        // Update existing
+        settings = (await UserSettings.findOneAndUpdate(
+          { userId },
+          { $set: { chatHistoryEnabled } },
+          { new: true, runValidators: true }
+        ))!;
+        logger.info({ userId, chatHistoryEnabled }, 'Updated chatHistoryEnabled');
+      }
+
+      res.json(settings);
+    } catch (error) {
+      logger.error(error as Error, 'Error in updateChatHistoryEnabled:');
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+
+  /**
    * DELETE /api/db/settings
    * Delete user settings
    */
@@ -306,6 +352,195 @@ export class DatabaseAPI {
       res.json({ success: true, message: 'User settings deleted' });
     } catch (error) {
       logger.error(error as Error, 'Error in deleteUserSettings:');
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+
+  // ==================== CONVERSATION METHODS ====================
+
+  /**
+   * Get today's date in YYYY-MM-DD format
+   */
+  private getTodayDate(): string {
+    const now = new Date();
+    return now.toISOString().split('T')[0];
+  }
+
+  /**
+   * Format date string to readable title (e.g., "January 18, 2026")
+   */
+  private formatDateTitle(dateStr: string): string {
+    const date = new Date(dateStr + 'T00:00:00');
+    return date.toLocaleDateString('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric',
+    });
+  }
+
+  /**
+   * Initialize today's conversation for a user session.
+   * Creates a new conversation if one doesn't exist for today.
+   * Does nothing if a conversation already exists for today.
+   * @returns The conversation for today (existing or newly created)
+   */
+  async initializeTodayConversation(userId: string): Promise<IConversation> {
+    const today = this.getTodayDate();
+    const title = this.formatDateTitle(today);
+
+    // Use findOneAndUpdate with upsert to atomically create if not exists
+    const conversation = await Conversation.findOneAndUpdate(
+      { userId, date: today },
+      {
+        $setOnInsert: {
+          userId,
+          date: today,
+          title,
+          messages: [],
+          hasUnread: false,
+        },
+      },
+      {
+        upsert: true,
+        new: true,
+        runValidators: true,
+      }
+    );
+
+    logger.info({ userId, date: today }, '✅ Today\'s conversation initialized');
+    return conversation as IConversation;
+  }
+
+  /**
+   * Generate a unique message ID
+   */
+  private generateMessageId(): string {
+    return `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+  }
+
+  /**
+   * Add a message to today's conversation
+   */
+  async addMessageToConversation(
+    userId: string,
+    role: 'user' | 'assistant',
+    content: string,
+    photoTimestamp?: number
+  ): Promise<IConversation | null> {
+    const today = this.getTodayDate();
+    const messageId = this.generateMessageId();
+
+    // Get current message count to calculate the next message number
+    const existingConversation = await Conversation.findOne({ userId, date: today });
+    const messageNumber = existingConversation ? existingConversation.messages.length + 1 : 1;
+
+    const conversation = await Conversation.findOneAndUpdate(
+      { userId, date: today },
+      {
+        $push: {
+          messages: {
+            id: messageId,
+            messageNumber,
+            role,
+            content,
+            photoTimestamp,
+            timestamp: new Date(),
+          },
+        },
+        $set: {
+          hasUnread: role === 'assistant',
+        },
+      },
+      { new: true }
+    );
+
+    if (conversation) {
+      logger.info({ userId, date: today, role, messageId, messageNumber }, 'Added message to conversation');
+    }
+
+    return conversation;
+  }
+
+  /**
+   * GET /api/db/conversations
+   * Get all conversations for a user, sorted by date (newest first)
+   */
+  async getUserConversations(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.query.userId as string;
+
+      if (!userId) {
+        res.status(400).json({ error: 'userId is required' });
+        return;
+      }
+
+      const conversations = await Conversation.find({ userId })
+        .sort({ date: -1 })
+        .lean();
+
+      res.json(conversations);
+    } catch (error) {
+      logger.error(error as Error, 'Error in getUserConversations:');
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+
+  /**
+   * GET /api/db/conversations/:date
+   * Get a specific conversation by date
+   */
+  async getConversationByDate(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.query.userId as string;
+      const { date } = req.params;
+
+      if (!userId) {
+        res.status(400).json({ error: 'userId is required' });
+        return;
+      }
+
+      const conversation = await Conversation.findOne({ userId, date }).lean();
+
+      if (!conversation) {
+        res.status(404).json({ error: 'Conversation not found' });
+        return;
+      }
+
+      res.json(conversation);
+    } catch (error) {
+      logger.error(error as Error, 'Error in getConversationByDate:');
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+
+  /**
+   * PATCH /api/db/conversations/:date/read
+   * Mark a conversation as read
+   */
+  async markConversationRead(req: Request, res: Response): Promise<void> {
+    try {
+      const { userId } = req.body;
+      const { date } = req.params;
+
+      if (!userId) {
+        res.status(400).json({ error: 'userId is required' });
+        return;
+      }
+
+      const conversation = await Conversation.findOneAndUpdate(
+        { userId, date },
+        { $set: { hasUnread: false } },
+        { new: true }
+      );
+
+      if (!conversation) {
+        res.status(404).json({ error: 'Conversation not found' });
+        return;
+      }
+
+      res.json(conversation);
+    } catch (error) {
+      logger.error(error as Error, 'Error in markConversationRead:');
       res.status(500).json({ error: 'Internal server error' });
     }
   }
