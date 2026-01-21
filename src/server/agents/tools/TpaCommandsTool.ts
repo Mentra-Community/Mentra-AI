@@ -99,7 +99,7 @@ export class TpaListAppsTool extends StructuredTool {
   public async getAllApps(): Promise<AppInfo[]> {
     try {
       // Use the correct API endpoint from the routes file
-      const url = `${this.cloudUrl}/api/system-app/apps?apiKey=${AUGMENTOS_API_KEY}&packageName=${PACKAGE_NAME}&userId=${this.userId}`;
+      const url = `${this.cloudUrl}/api/sdk/system-app/apps?apiKey=${AUGMENTOS_API_KEY}&packageName=${PACKAGE_NAME}&userId=${this.userId}`;
       console.log(`[TpaListAppsTool] Fetching apps from URL: ${url}`);
       console.log(`[TpaListAppsTool] API Key: ${AUGMENTOS_API_KEY ? 'Present' : 'Missing'}`);
       console.log(`[TpaListAppsTool] Package Name: ${PACKAGE_NAME}`);
@@ -176,7 +176,7 @@ export class TpaCommandsTool extends StructuredTool {
   private async executeCommand(action: string, packageName: string): Promise<string> {
     try {
       // Use the miniapps API endpoint with API key auth
-      const url = `${this.cloudUrl}/api/system-app/${packageName}/${action}?apiKey=${AUGMENTOS_API_KEY}&packageName=${PACKAGE_NAME}&userId=${this.userId}`;
+      const url = `${this.cloudUrl}/api/sdk/system-app/${packageName}/${action}?apiKey=${AUGMENTOS_API_KEY}&packageName=${PACKAGE_NAME}&userId=${this.userId}`;
       console.log(`[TPA_Commands] Executing command: ${action} for package: ${packageName}`);
       console.log(`[TPA_Commands] Request URL:`, url);
       const response = await axios.post(url);
@@ -239,7 +239,7 @@ IMPORTANT: Check the 'parameters' field of each tool to know what parameters are
     console.log(`[TPA_ListAppsWithTools] Fetching apps with tools (onlyRunning: ${onlyRunning})`);
 
     try {
-      const url = `${this.cloudUrl}/api/system-app/apps?apiKey=${AUGMENTOS_API_KEY}&packageName=${PACKAGE_NAME}&userId=${this.userId}`;
+      const url = `${this.cloudUrl}/api/sdk/system-app/apps?apiKey=${AUGMENTOS_API_KEY}&packageName=${PACKAGE_NAME}&userId=${this.userId}`;
       const response = await axios.get(url);
 
       if (!response.data || !response.data.success) {

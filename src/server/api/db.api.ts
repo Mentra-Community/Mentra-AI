@@ -10,7 +10,7 @@ const DEFAULT_USER_SETTINGS = {
   visionModel: 'Gemini Flash Latest',
   personality: 'default' as const,
   theme: 'light' as const,
-  followUpEnabled: true,
+  followUpEnabled: false,
   chatHistoryEnabled: false, // Beta feature - disabled by default
 };
 

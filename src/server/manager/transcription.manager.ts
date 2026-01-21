@@ -50,7 +50,7 @@ export class TranscriptionManager {
   private isWaitingForClarification: boolean = false;
 
   // Follow-up sound setting (cached from database)
-  private followUpEnabled: boolean = true;
+  private followUpEnabled: boolean = false;
   private followUpSettingLoaded: boolean = false;
 
   // Follow-up listening mode - listens for 5 seconds without wake word after query completes
@@ -696,13 +696,13 @@ export class TranscriptionManager {
     try {
       const settings = await UserSettings.findOne({ userId: this.userId });
       if (settings) {
-        this.followUpEnabled = settings.followUpEnabled ?? true;
+        this.followUpEnabled = settings.followUpEnabled ?? false;
         console.log(`🔔 [Session ${this.sessionId}]: Follow-up sound ${this.followUpEnabled ? 'enabled' : 'disabled'}`);
       }
       this.followUpSettingLoaded = true;
     } catch (error) {
-      logger.warn({ error }, 'Failed to load follow-up setting, defaulting to enabled');
-      this.followUpEnabled = true;
+      logger.warn({ error }, 'Failed to load follow-up setting, defaulting to disabled');
+      this.followUpEnabled = false;
       this.followUpSettingLoaded = true;
     }
   }

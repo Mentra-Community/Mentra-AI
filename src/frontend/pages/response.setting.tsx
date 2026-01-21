@@ -58,7 +58,7 @@ const personalities: Personality[] = [
 
 function ResponseSetting({ userId, showToast }: ResponseSettingProps) {
   const [selectedPersonality, setSelectedPersonality] = useState<string>('default')
-  const [followUpEnabled, setFollowUpEnabled] = useState(true)
+  const [followUpEnabled, setFollowUpEnabled] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
 
   // Load user's settings on mount
@@ -67,7 +67,7 @@ function ResponseSetting({ userId, showToast }: ResponseSettingProps) {
       try {
         const settings = await fetchUserSettings(userId);
         setSelectedPersonality(settings.personality);
-        setFollowUpEnabled(settings.followUpEnabled ?? true);
+        setFollowUpEnabled(settings.followUpEnabled ?? false);
         console.log('✅ Loaded response settings:', settings.personality, settings.followUpEnabled);
       } catch (error) {
         console.error('Failed to load settings:', error);

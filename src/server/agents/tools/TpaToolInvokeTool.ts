@@ -44,7 +44,7 @@ Empty parameters will cause errors for tools that require them.`;
 
     try {
       // Use the system-app API endpoint to invoke the tool
-      const url = `${this.cloudUrl}/api/system-app/invoke-tool?apiKey=${AUGMENTOS_API_KEY}&packageName=${PACKAGE_NAME}&userId=${this.userId}`;
+      const url = `${this.cloudUrl}/api/sdk/system-app/invoke-tool?apiKey=${AUGMENTOS_API_KEY}&packageName=${PACKAGE_NAME}&userId=${this.userId}`;
 
       const payload = {
         targetPackageName: input.targetPackageName,

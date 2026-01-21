@@ -18,7 +18,7 @@ const PACKAGE_NAME = process.env.PACKAGE_NAME;
 
 export async function getAllToolsForPackage(cloudUrl: string, tpaPackageName: string, actingUserId: string) {
   // Get the tools from the cloud using the system-app API
-  const urlToGetTools = `${cloudUrl}/api/system-app/apps/${tpaPackageName}/tools?apiKey=${AUGMENTOS_API_KEY}&packageName=${PACKAGE_NAME}&userId=${actingUserId}`;
+  const urlToGetTools = `${cloudUrl}/api/sdk/system-app/apps/${tpaPackageName}/tools?apiKey=${AUGMENTOS_API_KEY}&packageName=${PACKAGE_NAME}&userId=${actingUserId}`;
   const response = await axios.get<{ success: boolean; data: ToolSchema[] }>(urlToGetTools);
 
   if (!response.data || !response.data.success) {
@@ -114,7 +114,7 @@ export function compileTool(cloudUrl: string, tpaPackageName: string, tpaTool: T
   return tool(
     async (input): Promise<string> => {
       // Build webhook endpoint URL for this specific TPA tool using system-app API
-      const webhookUrl = cloudUrl + `/api/system-app/apps/${tpaPackageName}/tool?apiKey=${AUGMENTOS_API_KEY}&packageName=${PACKAGE_NAME}&userId=${actingUserId}`;
+      const webhookUrl = cloudUrl + `/api/sdk/system-app/apps/${tpaPackageName}/tool?apiKey=${AUGMENTOS_API_KEY}&packageName=${PACKAGE_NAME}&userId=${actingUserId}`;
 
       // Handle different input formats - LangChain may pass strings or objects
       const params: any = typeof input === 'string' ? {} : input;
@@ -182,7 +182,7 @@ export function compileTool(cloudUrl: string, tpaPackageName: string, tpaTool: T
  */
 async function getRunningAppPackages(cloudUrl: string, userId: string): Promise<Set<string>> {
   try {
-    const url = `${cloudUrl}/api/system-app/apps?apiKey=${AUGMENTOS_API_KEY}&packageName=${PACKAGE_NAME}&userId=${userId}`;
+    const url = `${cloudUrl}/api/sdk/system-app/apps?apiKey=${AUGMENTOS_API_KEY}&packageName=${PACKAGE_NAME}&userId=${userId}`;
     const response = await axios.get(url);
 
     if (!response.data || !response.data.success) {
@@ -230,7 +230,7 @@ export async function getAllToolsForUser(cloudUrl: string, userId: string, onlyR
     }
 
     // Construct the URL to get all tools for the user using system-app API
-    const urlToGetUserTools = `${cloudUrl}/api/system-app/tools?apiKey=${AUGMENTOS_API_KEY}&packageName=${PACKAGE_NAME}&userId=${userId}`;
+    const urlToGetUserTools = `${cloudUrl}/api/sdk/system-app/tools?apiKey=${AUGMENTOS_API_KEY}&packageName=${PACKAGE_NAME}&userId=${userId}`;
 
     // Make the request to get all tools for the user
     const response = await axios.get<{ success: boolean; data: Array<ToolSchema & { appPackageName: string }> }>(urlToGetUserTools);
