@@ -7,7 +7,6 @@
 export const explicitWakeWords = [
   // Canonical
   "hey mentra",
-  "he mentra",
 
   // Spacing / punctuation
   "heymentra",
@@ -15,14 +14,10 @@ export const explicitWakeWords = [
 
   // Common phonetic variants
   "hey mantra",
-  "he mantra",
   "hey manta",
   "hey menta",
-  "he menta",
   "hey mentara",
-  "he mentara",
   "hey mentera",
-  "he mentera",
   "hey montra",
   "hey montera",
   "hey monta",
