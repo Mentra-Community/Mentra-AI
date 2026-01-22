@@ -303,7 +303,7 @@ export class QueryProcessor {
           originalQuery: query, // Pass original query for conversation history storage
           photo: null,
           getPhotoCallback: async () => null,
-          hasDisplay: true,
+          hasDisplay: this.session.capabilities?.hasDisplay,
         });
 
         await this.handleAgentResponse(agentResponse, query, null, processQueryStartTime);

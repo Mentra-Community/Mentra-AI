@@ -132,23 +132,24 @@ export const CAMERA_RESPONSE_CONFIGS: Record<ResponseMode, ResponseConfig> = {
 };
 
 /**
- * Display glasses - Tighter limits due to small screen space
+ * Display glasses - Single mode, ultra-brief responses for tiny screen
+ * All modes forced to 15 words max since display space is extremely limited
  */
 export const DISPLAY_RESPONSE_CONFIGS: Record<ResponseMode, ResponseConfig> = {
   [ResponseMode.QUICK]: {
     wordLimit: 15,
-    maxTokens: 800,
-    instructions: 'Keep your answer under 15 words. Maximum brevity for display.'
+    maxTokens: 600,
+    instructions: '🚨 CRITICAL: MAXIMUM 15 WORDS. Display screen is tiny. Every word counts. Be extremely brief.'
   },
   [ResponseMode.STANDARD]: {
-    wordLimit: 40,
-    maxTokens: 1000,
-    instructions: 'Provide your answer in 30-40 words.'
+    wordLimit: 15,
+    maxTokens: 600,
+    instructions: '🚨 CRITICAL: MAXIMUM 15 WORDS. Display screen is tiny. Every word counts. Be extremely brief.'
   },
   [ResponseMode.DETAILED]: {
-    wordLimit: 75,
-    maxTokens: 1200,
-    instructions: 'Provide a concise explanation in 60-75 words.'
+    wordLimit: 15,
+    maxTokens: 600,
+    instructions: '🚨 CRITICAL: MAXIMUM 15 WORDS. Display screen is tiny. Every word counts. Be extremely brief.'
   }
 };
 
