@@ -187,18 +187,22 @@ export class TranscriptionManager {
       // Request a fresh photo ONLY when we first detect the wake word (start of query)
       // This prevents taking multiple photos during the same query
       this.photoManager.requestPhoto();
-      // Check for cancellation phrases before starting to listen
-      const queryAfterWakeWord = this.wakeWordDetector.removeWakeWord(text).trim();
-      const cancellationCheck = this.cancellationDecider.checkIfWantsToCancel(queryAfterWakeWord);
 
-      if (cancellationCheck === CancellationDecision.CANCEL) {
-        this.logger.debug("Cancellation phrase detected, aborting query");
-        this.handleCancellation();
-        return;
-      }
-
-      // Play start listening sound
+      // Play start listening sound immediately (don't wait for AI cancellation check)
       this.audioManager.playStartListening();
+
+      // Check for cancellation phrases using AI-powered detection (non-blocking)
+      // This runs in parallel with the user continuing to speak
+      const queryAfterWakeWord = this.wakeWordDetector.removeWakeWord(text).trim();
+      this.cancellationDecider.checkIfWantsToCancelAsync(queryAfterWakeWord).then(cancellationCheck => {
+        if (cancellationCheck === CancellationDecision.CANCEL && !this.isProcessingQuery) {
+          this.logger.debug("Cancellation phrase detected by AI, aborting query");
+          this.handleCancellation();
+        }
+      }).catch(error => {
+        console.error(`❌ AI cancellation check failed:`, error);
+        // On error, continue processing (don't cancel)
+      });
 
       // Non-blocking location refresh on wake word
       try {

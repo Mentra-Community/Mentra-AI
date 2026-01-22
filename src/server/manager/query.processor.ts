@@ -5,7 +5,7 @@ import {
   logger as _logger
 } from '@mentra/sdk';
 import { MiraAgent, CameraQuestionAgent } from '../agents';
-import { wrapText, getCancellationDecider } from '../utils';
+import { wrapText, getCancellationDecider, CancellationDecision } from '../utils';
 import { getVisionQueryDecider, VisionQueryDecider, VisionDecision } from '../utils/vision-query-decider';
 import { getRecallMemoryDecider, RecallMemoryDecider, RecallDecision } from '../utils/recall-memory-decider';
 import { getAppToolQueryDecider, AppToolQueryDecider, AppToolDecision } from '../utils/app-tool-query-decider';
@@ -132,8 +132,9 @@ export class QueryProcessor {
     });
 
     // Check if query is just an affirmative phrase (e.g., "Hey Mentra, thank you")
+    // Use AI-powered detection for accurate intent recognition
     const cancellationDecider = getCancellationDecider();
-    const isAffirmative = cancellationDecider.isAffirmativePhrase(query);
+    const isAffirmative = await cancellationDecider.isAffirmativePhraseAI(query);
 
     if (isAffirmative) {
       console.log(`✅ [${new Date().toISOString()}] Initial query is affirmative phrase - not processing`);
@@ -142,18 +143,22 @@ export class QueryProcessor {
       return false; // Don't enter follow-up mode for affirmative phrases
     }
 
-    // Check if query is a cancellation phrase (safety net)
-    if (this.wakeWordDetector.isCancellation(query)) {
-      logger.debug("Cancellation detected in processQuery");
+    // Check if query is a cancellation phrase using AI-powered detection (safety net)
+    // This prevents false positives like "help me cancel my appointment" being treated as cancellation
+    const cancellationCheck = await cancellationDecider.checkIfWantsToCancelAsync(query);
+    if (cancellationCheck === CancellationDecision.CANCEL) {
+      logger.debug("Cancellation detected in processQuery (AI-powered)");
       await this.audioManager.playCancellation();
       this.session.layouts.showTextWall("Cancelled", { durationMs: 2000 });
       return false; // Don't enter follow-up mode for cancellation phrases
     }
 
     if (query.trim().length === 0) {
+      // Play cancellation sound as feedback for empty query
+      await this.audioManager.playCancellation();
       this.session.layouts.showTextWall(
         wrapText("No query provided.", 30),
-        { durationMs: 5000 }
+        { durationMs: 3000 }
       );
       return false;
     }

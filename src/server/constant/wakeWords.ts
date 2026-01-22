@@ -8,47 +8,47 @@ export const explicitWakeWords = [
   // Canonical
   "hey mentra",
 
-  // Spacing / punctuation
-  "heymentra",
-  "hey-mentra",
+  // // Spacing / punctuation
+  // "heymentra",
+  // "hey-mentra",
 
-  // Common phonetic variants
-  "hey mantra",
-  "hey manta",
-  "hey menta",
-  "hey mentara",
-  "hey mentera",
-  "hey montra",
-  "hey montera",
-  "hey monta",
-  "hey mentro",
-  "hey mentroa",
-  "hey mentu",
+  // // Common phonetic variants
+  // "hey mantra",
+  // "hey manta",
+  // "hey menta",
+  // "hey mentara",
+  // "hey mentera",
+  // "hey montra",
+  // "hey montera",
+  // "hey monta",
+  // "hey mentro",
+  // "hey mentroa",
+  // "hey mentu",
 
-  // ASR vowel swaps
-  "hey mehntra",
-  "hey menra",
-  "hey manra",
-  "hey mendra",
-  "hey mendro",
-  "hey mentaah",
+  // // ASR vowel swaps
+  // "hey mehntra",
+  // "hey menra",
+  // "hey manra",
+  // "hey mendra",
+  // "hey mendro",
+  // "hey mentaah",
 
-  // Soft consonant errors
-  "hey mencha",
-  "hey menja",
+  // // Soft consonant errors
+  // "hey mencha",
+  // "hey menja",
 
-  // Extended / doubled endings
-  "hey mantraa",
-  "hey mantrae",
-  "hey montraa",
+  // // Extended / doubled endings
+  // "hey mantraa",
+  // "hey mantrae",
+  // "hey montraa",
 
-  // Common misrecognitions (keep if your logs show them)
-  "hey mentor",
-  "hey mental",
+  // // Common misrecognitions (keep if your logs show them)
+  // "hey mentor",
+  // "hey mental",
 
-  // Edge but observed
-  "hey metro",
-  "hey mandra"
+  // // Edge but observed
+  // "hey metro",
+  // "hey mandra"
 ];
 
 
