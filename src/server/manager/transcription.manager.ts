@@ -396,21 +396,24 @@ export class TranscriptionManager {
   private async startFollowUpListening(): Promise<void> {
     console.log(`🔔 [${new Date().toISOString()}] Starting follow-up listening mode (5 second window)`);
 
-    // Play the follow-up sound
-    await this.audioManager.playFollowUp();
-    console.log(`🔔 [${new Date().toISOString()}] Follow-up sound completed`);
-
-    // Enter follow-up mode
+    // CRITICAL: Set state BEFORE audio to prevent race condition
+    // Transcriptions arriving during audio playback must route to follow-up handling,
+    // not wake word detection. Otherwise, ambient sound during the follow-up chime
+    // can trigger false activations.
     this.isInFollowUpMode = true;
     this.isProcessingQuery = false;
     this.transcriptionStartTime = 0;
     this.transcriptProcessor.clear();
 
-    // Set 5-second timeout to cancel follow-up mode if no response
+    // Set timeout first (5-second window starts now, not after audio)
     this.followUpTimeoutId = setTimeout(() => {
       console.log(`⏰ [${new Date().toISOString()}] Follow-up timeout (5s) - no response, returning to normal mode`);
       this.cancelFollowUpMode();
     }, 5000);
+
+    // Play the follow-up sound (state is already set, so transcriptions route correctly)
+    await this.audioManager.playFollowUp();
+    console.log(`🔔 [${new Date().toISOString()}] Follow-up sound completed`);
   }
 
   /**
