@@ -131,6 +131,14 @@ export class QueryProcessor {
       logger.warn(`Failed to clear transcripts: ${err.message}`);
     });
 
+    // IMPORTANT: Check for pending clarification FIRST before any other checks
+    // This ensures "Sure", "Yes", etc. are processed as camera confirmations
+    // rather than being caught by the affirmative phrase detection
+    if (this.pendingClarification) {
+      const shouldEnterFollowUp = await this.handleClarificationResponse(query);
+      return shouldEnterFollowUp; // Enable follow-up if query was successfully processed
+    }
+
     // Check if query is just an affirmative phrase (e.g., "Hey Mentra, thank you")
     // Use AI-powered detection for accurate intent recognition
     const cancellationDecider = getCancellationDecider();
@@ -161,12 +169,6 @@ export class QueryProcessor {
         { durationMs: 3000 }
       );
       return false;
-    }
-
-    // Check if this is a clarification response to a pending vision query
-    if (this.pendingClarification) {
-      const shouldEnterFollowUp = await this.handleClarificationResponse(query);
-      return shouldEnterFollowUp; // Enable follow-up if query was successfully processed
     }
 
     // Play processing sounds
