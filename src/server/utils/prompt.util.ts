@@ -9,10 +9,10 @@ import { PERSONALITIES, PersonalityType } from '../constant/personality';
 export function buildSystemPromptWithPersonality(personality: PersonalityType = 'default'): string {
   const personalityPrompt = PERSONALITIES[personality];
 
-  // Inject personality right after the introduction with strong emphasis TODO THE PROMPT Injection is off and does not work...
+  // Inject personality right after the introduction with strong emphasis
   const promptWithPersonality = MIRA_SYSTEM_PROMPT.replace(
-    'You are Mentra AI: an AI assistant living in smart glasses.',
-    `You are Mentra AI: an AI assistant living in smart glasses.
+    "I'm Mentra AI - I live in these smart glasses and I'm here to help.",
+    `I'm Mentra AI - I live in these smart glasses and I'm here to help.
 
 ═══════════════════════════════════════════
 ⚡ YOUR PERSONALITY - CRITICAL DIRECTIVE ⚡
