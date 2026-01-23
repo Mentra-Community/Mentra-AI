@@ -544,11 +544,11 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
                             />
                           </div>
                         )}
-                       <div className={` text-[var(--foreground)] leading-relaxed whitespace-pre-line pt-[8px] pb-[8px] pr-[16px] pl-[16px] rounded-[16px] inline-block max-w-lg text-[16px]  ${
+                       <div className={` text-[var(--foreground)] leading-relaxed whitespace-pre-line pt-[8px] pb-[8px] pr-[16px] pl-[16px] rounded-[16px] inline-block max-w-[85vw] sm:max-w-lg text-[16px]  ${
                           isOwnMessage
                             ? 'bg-[var(--primary-foreground)] font-medium text-[var(--secondary-foreground:)]'
                             : 'bg-transparent pl-0 font-medium *:text-[var(--secondary-foreground:)]'
-                        }`}>
+                        }`} style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
                           {message.content}
                         </div>
                         <div className={`text-[12px] ml-[15px] mt-1.5 ${isOwnMessage ? 'text-right' : 'text-left'} w-full text-gray-400`}>

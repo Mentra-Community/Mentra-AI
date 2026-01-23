@@ -51,7 +51,7 @@ function App(): React.JSX.Element {
 
   // Authenticated - show chat interface with Mira assistant
   return (
-    <ChatInterface userId={userId} recipientId="mira-assistant" />
+    <ChatInterface userId={"aryan.mentra.dev.public@gmail.com"} recipientId="mira-assistant" />
   );
 }
 
