@@ -1,34 +1,19 @@
 import { MIRA_SYSTEM_PROMPT } from '../constant/prompts';
-import { PERSONALITIES, PersonalityType } from '../constant/personality';
+import { PersonalityType } from '../constant/personality';
 
 /**
- * Builds the system prompt with personality injected
- * @param personality The personality type to inject
- * @returns The complete system prompt with personality
+ * Builds the system prompt with response instructions placeholder
+ * @param _personality The personality type (currently unused, kept for API compatibility)
+ * @returns The complete system prompt with response instructions placeholder
  */
-export function buildSystemPromptWithPersonality(personality: PersonalityType = 'default'): string {
-  const personalityPrompt = PERSONALITIES[personality];
-
-  // Inject personality right after the introduction with strong emphasis
-  const promptWithPersonality = MIRA_SYSTEM_PROMPT.replace(
+export function buildSystemPromptWithPersonality(_personality: PersonalityType = 'default'): string {
+  // Inject response instructions placeholder after the introduction
+  const promptWithInstructions = MIRA_SYSTEM_PROMPT.replace(
     "I'm Mentra AI - I live in these smart glasses and I'm here to help.",
     `I'm Mentra AI - I live in these smart glasses and I'm here to help.
 
-═══════════════════════════════════════════
-⚡ YOUR PERSONALITY - CRITICAL DIRECTIVE ⚡
-═══════════════════════════════════════════
-${personalityPrompt}
-
-IMPORTANT: This is your CORE VOICE. Every response MUST embody this personality completely. Don't hold back - fully commit to this communication style. This overrides generic AI behavior.
-═══════════════════════════════════════════
-
-RESPONSE LENGTH GUIDELINE: {response_instructions}
-
-🚨 ABSOLUTE PRIORITY ORDER 🚨
-1. FIRST: Follow ALL personality requirements (including ANY mandatory words, phrases, or formatting)
-2. SECOND: Stay within word count
-If there's ANY conflict, PERSONALITY WINS. The personality requirements are NON-NEGOTIABLE and must be followed even if it means exceeding the word count slightly.`
+{response_instructions}`
   );
 
-  return promptWithPersonality;
+  return promptWithInstructions;
 }

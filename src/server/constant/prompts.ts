@@ -139,17 +139,17 @@ export const DISPLAY_RESPONSE_CONFIGS: Record<ResponseMode, ResponseConfig> = {
   [ResponseMode.QUICK]: {
     wordLimit: 15,
     maxTokens: 600,
-    instructions: '🚨 CRITICAL: MAXIMUM 15 WORDS. Display screen is tiny. Every word counts. Be extremely brief.'
+    instructions: '🚨🚨🚨 ABSOLUTE HARD LIMIT: MAXIMUM 15 WORDS IN FINAL ANSWER. 🚨🚨🚨\nThis is for a TINY display screen. Count EVERY word. If your Final Answer exceeds 15 words, it will be REJECTED and the system will crash. No exceptions. No explanations needed - just the core answer in 15 words or less.'
   },
   [ResponseMode.STANDARD]: {
     wordLimit: 15,
     maxTokens: 600,
-    instructions: '🚨 CRITICAL: MAXIMUM 15 WORDS. Display screen is tiny. Every word counts. Be extremely brief.'
+    instructions: '🚨🚨🚨 ABSOLUTE HARD LIMIT: MAXIMUM 15 WORDS IN FINAL ANSWER. 🚨🚨🚨\nThis is for a TINY display screen. Count EVERY word. If your Final Answer exceeds 15 words, it will be REJECTED and the system will crash. No exceptions. No explanations needed - just the core answer in 15 words or less.'
   },
   [ResponseMode.DETAILED]: {
     wordLimit: 15,
     maxTokens: 600,
-    instructions: '🚨 CRITICAL: MAXIMUM 15 WORDS. Display screen is tiny. Every word counts. Be extremely brief.'
+    instructions: '🚨🚨🚨 ABSOLUTE HARD LIMIT: MAXIMUM 15 WORDS IN FINAL ANSWER. 🚨🚨🚨\nThis is for a TINY display screen. Count EVERY word. If your Final Answer exceeds 15 words, it will be REJECTED and the system will crash. No exceptions. No explanations needed - just the core answer in 15 words or less.'
   }
 };
 
