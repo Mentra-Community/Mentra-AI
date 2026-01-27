@@ -1049,7 +1049,10 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
         break;
     }
 
-    const systemPrompt = this.agentPrompt
+    // Rebuild the prompt with the correct hasDisplay value to adapt glasses references
+    const deviceAwarePrompt = buildSystemPromptWithPersonality(this.personality, hasDisplay);
+
+    const systemPrompt = deviceAwarePrompt
       .replace("{response_instructions}", config.instructions + personalityInstructions)
       .replace("{tool_names}", toolNames.join("\n"))
       .replace("{location_context}", locationInfo)

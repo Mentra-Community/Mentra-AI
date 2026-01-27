@@ -23,7 +23,7 @@ DEFINITELY REQUIRES CAMERA (respond "YES"):
 - Asking to fix/diagnose something visible: "what's wrong with this", "how do i fix this", "why isn't this working"
 - Asking how to use something they're looking at: "how do i use this", "how does this work"
 - Asking about colors, counts, sizes of visible things: "what color is this", "how many are there"
-- Asking to identify visible surroundings/landmarks: "what building is this", "what store is that", "what restaurant is this"
+- Asking to identify visible surroundings/landmarks using "this"/"that": "what building is this", "what store is that", "what restaurant is this" (NOT "what is restaurant X" which asks about a named place)
 - Asking for price, name, or info about "this" or "that" object: "what's the price of this", "tell me the plant", "the price of this"
 - ANY query containing "this" or "that" when asking about physical properties (price, name, type, brand, color, size, appearance) = YES
 
@@ -38,6 +38,8 @@ DEFINITELY DOES NOT REQUIRE CAMERA (respond "NO"):
 - Questions about conversation history or memory: "what did I just ask", "what did I say", "what was my last question", "repeat that", "say that again", "what were we talking about", "remind me what I asked"
 - GPS/location questions (NOT about visible surroundings): "what's my current location", "where am I right now", "what city am I in", "what's my address", "give me my coordinates"
 - Follow-up questions that clearly reference previous conversation topics (see conversation context below)
+- Questions about NAMED/SPECIFIC entities: "what is restaurant X", "tell me about place Y", "where is store Z located" - these are asking about a known business/place BY NAME, not asking to identify something visible
+- Questions asking for info about a specific named business/place: "what is Starbucks", "where is Papito's", "what is restaurant Rapido" = NO (they're asking about something by name, not looking at it)
 
 AMBIGUOUS - COULD GO EITHER WAY (respond "UNSURE"):
 - "what am I working on" - could refer to visible task OR abstract question = UNSURE
