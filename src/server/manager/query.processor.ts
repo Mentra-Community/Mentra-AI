@@ -83,7 +83,7 @@ export class QueryProcessor {
   /**
    * Process and respond to the user's query
    */
-  async processQuery(rawText: string, timerDuration: number, transcriptionStartTime: number): Promise<boolean> {
+  async processQuery(rawText: string, timerDuration: number, transcriptionStartTime: number, activeSpeakerId?: string): Promise<boolean> {
     const processQueryStartTime = Date.now();
     console.log(`\n${"█".repeat(70)}`);
     console.log(`⏱️  [TIMESTAMP] 🚀 processQuery START: ${new Date().toISOString()}`);
@@ -111,8 +111,19 @@ export class QueryProcessor {
     // Get the transcript text - use only the LAST segment (final or interim)
     // Speech-to-text providers send cumulative text in each segment, so we only need the last one
     // Using multiple segments causes duplication when queries arrive close together
-    const segments = transcriptionResponse.segments;
+    let segments = transcriptionResponse.segments;
     let rawCombinedText = '';
+
+    // Filter segments by speaker ID if we have an active speaker locked
+    if (activeSpeakerId && segments.length > 0) {
+      const filteredSegments = segments.filter((seg: any) => seg.speakerId === activeSpeakerId);
+      if (filteredSegments.length > 0) {
+        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 🔒 Filtered to speaker ${activeSpeakerId}: ${filteredSegments.length}/${segments.length} segments`);
+        segments = filteredSegments;
+      } else {
+        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ⚠️ No segments found for speaker ${activeSpeakerId}, using all segments`);
+      }
+    }
 
     if (segments.length > 0) {
       // Always use the LAST segment - it contains the most complete/recent text

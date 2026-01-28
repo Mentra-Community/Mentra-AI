@@ -62,6 +62,9 @@ export class TranscriptionManager {
   // (backend doesn't properly clear/filter transcripts, so we skip text we've already processed)
   private lastProcessedQueryText: string = '';
 
+  // Speaker lock - only listen to the person who said the wake word
+  private activeSpeakerId: string | undefined = undefined;
+
   // Extracted managers and services
   private photoManager: PhotoManager;
   private locationService: LocationService;
@@ -120,9 +123,10 @@ export class TranscriptionManager {
   /**
    * Debug helper to log ALL transcriptions when DEBUG_LOG_ALL_TRANSCRIPTIONS is enabled
    */
-  private debugLogTranscription(text: string, isFinal: boolean, context: string): void {
+  private debugLogTranscription(text: string, isFinal: boolean, context: string, speakerId?: string): void {
     if (DEBUG_LOG_ALL_TRANSCRIPTIONS) {
-      console.log(`🐛 [DEBUG] [${new Date().toISOString()}] ${context}: "${text}" (isFinal: ${isFinal})`);
+      const speaker = speakerId ? `[Speaker ${speakerId}]` : '[Speaker ?]';
+      console.log(`🐛 [DEBUG] [${new Date().toISOString()}] ${speaker} ${context}: "${text}" (isFinal: ${isFinal})`);
     }
   }
 
@@ -131,10 +135,18 @@ export class TranscriptionManager {
    */
   async handleTranscription(transcriptionData: any): Promise<void> {
     // Debug logging (only if DEBUG_LOG_ALL_TRANSCRIPTIONS is enabled)
-    this.debugLogTranscription(transcriptionData.text, transcriptionData.isFinal, 'Transcription received');
+    this.debugLogTranscription(transcriptionData.text, transcriptionData.isFinal, 'Transcription received', transcriptionData.speakerId);
 
     // Broadcast transcription to SSE clients
     this.broadcastTranscription(transcriptionData.text, !!transcriptionData.isFinal);
+
+    // If we're listening to a query and have a locked speaker, ignore other speakers
+    if (this.isListeningToQuery && this.activeSpeakerId && transcriptionData.speakerId !== this.activeSpeakerId) {
+      if (DEBUG_LOG_ALL_TRANSCRIPTIONS) {
+        console.log(`🔇 [DEBUG] Ignoring speaker ${transcriptionData.speakerId} (locked to: ${this.activeSpeakerId})`);
+      }
+      return;
+    }
 
     if (this.isProcessingQuery) {
       this.logger.info(`[Session ${this.sessionId}]: Query already in progress. Ignoring transcription.`);
@@ -230,6 +242,12 @@ export class TranscriptionManager {
     }
 
     this.isListeningToQuery = true;
+
+    // Lock onto the speaker who said the wake word
+    this.activeSpeakerId = transcriptionData.speakerId;
+    if (this.activeSpeakerId) {
+      console.log(`🔒 [DEBUG] Locked to speaker: ${this.activeSpeakerId}`);
+    }
 
     // If this is our first detection, start the transcription timer
     if (this.transcriptionStartTime === 0) {
@@ -573,6 +591,7 @@ export class TranscriptionManager {
     this.isListeningToQuery = false;
     this.isProcessingQuery = false;
     this.isInFollowUpMode = false;
+    this.activeSpeakerId = undefined; // Clear speaker lock
     this.photoManager.clearPhoto();
     this.transcriptionStartTime = 0;
     this.lastProcessedQueryText = ''; // Clear to allow fresh queries
@@ -746,7 +765,7 @@ export class TranscriptionManager {
     this.lastProcessedQueryText = rawText;
 
     try {
-      const result = await this.queryProcessor.processQuery(rawText, timerDuration, this.transcriptionStartTime);
+      const result = await this.queryProcessor.processQuery(rawText, timerDuration, this.transcriptionStartTime, this.activeSpeakerId);
       // If processQuery returns false, it means the query was cancelled or was an affirmative phrase
       // and we should NOT enter follow-up mode
       if (result === false) {
