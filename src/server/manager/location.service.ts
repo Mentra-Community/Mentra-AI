@@ -6,6 +6,95 @@ const logger = _logger.child({ service: 'LocationService' });
 
 const LOCATIONIQ_TOKEN = process.env.LOCATIONIQ_TOKEN;
 
+// ============================================
+// CACHING CONFIGURATION - Prevents excessive API calls
+// ============================================
+
+// Geocoding cache (Google Maps + LocationIQ combined)
+interface GeocodingCache {
+  googleMaps: { streetAddress?: string; neighborhood?: string } | null;
+  locationIQ: { city: string; state: string; country: string } | null;
+  timestamp: number;
+  lat: number;
+  lng: number;
+}
+
+// Timezone cache
+interface TimezoneCache {
+  timezone: {
+    name: string;
+    shortName: string;
+    fullName: string;
+    offsetSec: number;
+    isDst: boolean;
+  };
+  timestamp: number;
+  lat: number;
+  lng: number;
+}
+
+// Cache instances (module-level for persistence across calls)
+let geocodingCache: GeocodingCache | null = null;
+let timezoneCache: TimezoneCache | null = null;
+
+// Cache durations
+const GEOCODING_CACHE_DURATION_MS = 10 * 60 * 1000; // 10 minutes
+const TIMEZONE_CACHE_DURATION_MS = 12 * 60 * 60 * 1000;  // 12 hours (timezones rarely change)
+
+// Location thresholds (in degrees, ~111m per 0.001 degree at equator)
+const GEOCODING_LOCATION_THRESHOLD = 0.001; // ~100 meters
+const TIMEZONE_LOCATION_THRESHOLD = 0.1;    // ~10km (timezones are large)
+
+// API call statistics for monitoring
+const apiCallStats = {
+  googleMapsGeocoding: 0,
+  locationIQGeocoding: 0,
+  googleMapsTimezone: 0,
+  locationIQTimezone: 0,
+  geocodingCacheHits: 0,
+  timezoneCacheHits: 0
+};
+
+// Helper: Check if geocoding cache is valid
+function isGeocodingCacheValid(lat: number, lng: number): boolean {
+  if (!geocodingCache) return false;
+
+  const now = Date.now();
+  const isExpired = (now - geocodingCache.timestamp) > GEOCODING_CACHE_DURATION_MS;
+  const locationChanged = Math.abs(geocodingCache.lat - lat) > GEOCODING_LOCATION_THRESHOLD ||
+                          Math.abs(geocodingCache.lng - lng) > GEOCODING_LOCATION_THRESHOLD;
+
+  return !isExpired && !locationChanged;
+}
+
+// Helper: Check if timezone cache is valid
+function isTimezoneCacheValid(lat: number, lng: number): boolean {
+  if (!timezoneCache) return false;
+
+  const now = Date.now();
+  const isExpired = (now - timezoneCache.timestamp) > TIMEZONE_CACHE_DURATION_MS;
+  const locationChanged = Math.abs(timezoneCache.lat - lat) > TIMEZONE_LOCATION_THRESHOLD ||
+                          Math.abs(timezoneCache.lng - lng) > TIMEZONE_LOCATION_THRESHOLD;
+
+  return !isExpired && !locationChanged;
+}
+
+// Export stats for monitoring
+export function getApiCallStats() {
+  return { ...apiCallStats };
+}
+
+export function resetApiCallStats() {
+  apiCallStats.googleMapsGeocoding = 0;
+  apiCallStats.locationIQGeocoding = 0;
+  apiCallStats.googleMapsTimezone = 0;
+  apiCallStats.locationIQTimezone = 0;
+  apiCallStats.geocodingCacheHits = 0;
+  apiCallStats.timezoneCacheHits = 0;
+}
+
+// ============================================
+
 export interface LocationContext {
   city: string;
   state: string;
@@ -93,11 +182,45 @@ export class LocationService {
 
   /**
    * Enrich location with geocoding data from Google Maps and LocationIQ
+   * Uses caching to prevent excessive API calls
    */
   private async enrichWithGeocoding(lat: number, lng: number, locationInfo: LocationContext): Promise<void> {
-    // Try Google Maps first for street and neighborhood data
+    // Check cache first
+    if (isGeocodingCacheValid(lat, lng)) {
+      apiCallStats.geocodingCacheHits++;
+      const cacheAge = Math.round((Date.now() - geocodingCache!.timestamp) / 1000);
+      console.log(`[Geocoding] 📦 CACHED - Using cached geocoding data (${cacheAge}s old)`);
+
+      // Apply cached Google Maps data
+      if (geocodingCache!.googleMaps) {
+        locationInfo.streetAddress = geocodingCache!.googleMaps.streetAddress;
+        locationInfo.neighborhood = geocodingCache!.googleMaps.neighborhood;
+      }
+
+      // Apply cached LocationIQ data
+      if (geocodingCache!.locationIQ) {
+        locationInfo.city = geocodingCache!.locationIQ.city;
+        locationInfo.state = geocodingCache!.locationIQ.state;
+        locationInfo.country = geocodingCache!.locationIQ.country;
+      }
+      return;
+    }
+
+    console.log(`[Geocoding] 🌐 FETCHING FROM API - ${!geocodingCache ? 'No cache exists' : 'Cache expired or location changed'}`);
+
+    // Initialize cache entry
+    const newCache: GeocodingCache = {
+      googleMaps: null,
+      locationIQ: null,
+      timestamp: Date.now(),
+      lat,
+      lng
+    };
+
+    // Try Google Maps for street and neighborhood data
     try {
       console.log(`[Geocoding] Attempting Google Maps for (${lat}, ${lng})`);
+      apiCallStats.googleMapsGeocoding++;
       const googleResult = await reverseGeocode(lat, lng);
 
       if (googleResult.success && googleResult.address) {
@@ -107,34 +230,25 @@ export class LocationService {
         locationInfo.streetAddress = addr.streetAddress;
         locationInfo.neighborhood = addr.neighborhood;
 
-        // Log detailed address info
-        const details = [
-          addr.streetAddress,
-          addr.neighborhood
-        ].filter(Boolean).join(', ');
+        // Cache the Google Maps result
+        newCache.googleMaps = {
+          streetAddress: addr.streetAddress,
+          neighborhood: addr.neighborhood
+        };
 
+        const details = [addr.streetAddress, addr.neighborhood].filter(Boolean).join(', ');
         console.log(`[Geocoding] Google Maps success: ${details}`);
-        if (addr.neighborhood) console.log(`[Geocoding] Neighborhood: ${addr.neighborhood}`);
-        if (addr.streetAddress) console.log(`[Geocoding] Street: ${addr.streetAddress}`);
-
-        // Still need LocationIQ for city/state/country, so throw to use fallback
-        throw new Error('Google Maps only provided street/neighborhood, using LocationIQ for city/state');
       } else {
-        console.log(`[Geocoding] Google Maps failed: ${googleResult.error}, using LocationIQ`);
-        throw new Error('Google Maps unavailable, using fallback');
+        console.log(`[Geocoding] Google Maps failed: ${googleResult.error}`);
       }
     } catch (googleError) {
-      // Fallback to LocationIQ for city/state/country
-      await this.enrichWithLocationIQ(lat, lng, locationInfo);
+      console.warn('[Geocoding] Google Maps error:', googleError);
     }
-  }
 
-  /**
-   * Enrich location with LocationIQ data
-   */
-  private async enrichWithLocationIQ(lat: number, lng: number, locationInfo: LocationContext): Promise<void> {
+    // Always call LocationIQ for city/state/country (Google Maps doesn't return this reliably)
     try {
-      console.log(`[Geocoding] Using LocationIQ for reverse geocoding`);
+      console.log(`[Geocoding] Using LocationIQ for city/state/country`);
+      apiCallStats.locationIQGeocoding++;
       const response = await fetch(
         `https://us1.locationiq.com/v1/reverse.php?key=${LOCATIONIQ_TOKEN}&lat=${lat}&lon=${lng}&format=json`
       );
@@ -147,6 +261,14 @@ export class LocationService {
           locationInfo.city = address.city || address.town || address.village || 'Unknown city';
           locationInfo.state = address.state || 'Unknown state';
           locationInfo.country = address.country || 'Unknown country';
+
+          // Cache the LocationIQ result
+          newCache.locationIQ = {
+            city: locationInfo.city,
+            state: locationInfo.state,
+            country: locationInfo.country
+          };
+
           console.log(`[Geocoding] LocationIQ success: ${locationInfo.city}, ${locationInfo.state}`);
         }
       } else {
@@ -155,17 +277,34 @@ export class LocationService {
     } catch (geocodingError) {
       console.warn('[Geocoding] LocationIQ failed:', geocodingError);
     }
+
+    // Update the cache
+    geocodingCache = newCache;
+    console.log(`[Geocoding] 💾 Cache updated - API calls: Google=${apiCallStats.googleMapsGeocoding}, LocationIQ=${apiCallStats.locationIQGeocoding}, CacheHits=${apiCallStats.geocodingCacheHits}`);
   }
 
   /**
    * Enrich location with timezone data
+   * Uses caching to prevent excessive API calls (timezones rarely change)
    */
   private async enrichWithTimezone(lat: number, lng: number, locationInfo: LocationContext): Promise<void> {
+    // Check cache first - timezones are very stable, use longer cache
+    if (isTimezoneCacheValid(lat, lng)) {
+      apiCallStats.timezoneCacheHits++;
+      const cacheAge = Math.round((Date.now() - timezoneCache!.timestamp) / 1000);
+      console.log(`[Timezone] 📦 CACHED - Using cached timezone data (${cacheAge}s old)`);
+      locationInfo.timezone = timezoneCache!.timezone;
+      return;
+    }
+
+    console.log(`[Timezone] 🌐 FETCHING FROM API - ${!timezoneCache ? 'No cache exists' : 'Cache expired or location changed significantly'}`);
+
     let timezoneSuccess = false;
 
-    // Try LocationIQ first
+    // Try LocationIQ first (cheaper)
     try {
-      console.log(`[Geocoding] Attempting LocationIQ timezone lookup`);
+      console.log(`[Timezone] Attempting LocationIQ timezone lookup`);
+      apiCallStats.locationIQTimezone++;
       const timezoneResponse = await fetch(
         `https://us1.locationiq.com/v1/timezone?key=${LOCATIONIQ_TOKEN}&lat=${lat}&lon=${lng}&format=json`
       );
@@ -182,30 +321,43 @@ export class LocationService {
             isDst: !!timezoneData.timezone.now_in_dst
           };
           timezoneSuccess = true;
-          console.log(`[Geocoding] LocationIQ timezone success: ${locationInfo.timezone.name}`);
+          console.log(`[Timezone] LocationIQ success: ${locationInfo.timezone.name}`);
         }
       } else {
-        console.warn(`[Geocoding] LocationIQ timezone API failed with status: ${timezoneResponse.status}, trying Google Maps`);
+        console.warn(`[Timezone] LocationIQ failed with status: ${timezoneResponse.status}, trying Google Maps`);
       }
     } catch (timezoneError) {
-      console.warn('[Geocoding] LocationIQ timezone lookup failed:', timezoneError);
+      console.warn('[Timezone] LocationIQ lookup failed:', timezoneError);
     }
 
     // Fallback to Google Maps TimeZone API if LocationIQ failed
     if (!timezoneSuccess) {
       try {
-        console.log(`[Geocoding] Attempting Google Maps timezone lookup`);
+        console.log(`[Timezone] Attempting Google Maps timezone lookup`);
+        apiCallStats.googleMapsTimezone++;
         const googleTimezone = await getTimezone(lat, lng);
 
         if (googleTimezone.success && googleTimezone.timezone) {
           locationInfo.timezone = googleTimezone.timezone;
-          console.log(`[Geocoding] Google Maps timezone success: ${googleTimezone.timezone.name}`);
+          timezoneSuccess = true;
+          console.log(`[Timezone] Google Maps success: ${googleTimezone.timezone.name}`);
         } else {
-          console.warn(`[Geocoding] Google Maps timezone failed: ${googleTimezone.error}`);
+          console.warn(`[Timezone] Google Maps failed: ${googleTimezone.error}`);
         }
       } catch (googleTimezoneError) {
-        console.warn('[Geocoding] Google Maps timezone lookup failed:', googleTimezoneError);
+        console.warn('[Timezone] Google Maps lookup failed:', googleTimezoneError);
       }
+    }
+
+    // Update cache if we got a valid timezone
+    if (timezoneSuccess) {
+      timezoneCache = {
+        timezone: locationInfo.timezone,
+        timestamp: Date.now(),
+        lat,
+        lng
+      };
+      console.log(`[Timezone] 💾 Cache updated - API calls: LocationIQ=${apiCallStats.locationIQTimezone}, Google=${apiCallStats.googleMapsTimezone}, CacheHits=${apiCallStats.timezoneCacheHits}`);
     }
   }
 

@@ -9,6 +9,7 @@ import { wrapText, getCancellationDecider, CancellationDecision } from '../utils
 import { getVisionQueryDecider, VisionQueryDecider, VisionDecision } from '../utils/vision-query-decider';
 import { getRecallMemoryDecider, RecallMemoryDecider, RecallDecision } from '../utils/recall-memory-decider';
 import { getAppToolQueryDecider, AppToolQueryDecider, AppToolDecision } from '../utils/app-tool-query-decider';
+import { getLocationQueryType } from '../utils/location-query-decider';
 import { ChatManager } from './chat.manager';
 import { PhotoManager } from './photo.manager';
 import { AudioPlaybackManager } from './audio-playback.manager';
@@ -29,6 +30,7 @@ interface QueryProcessorConfig {
   wakeWordDetector: WakeWordDetector;
   onRequestClarification?: () => void; // Callback to trigger new listening session
   onConversationTurn?: (query: string, response: string, photoTimestamp?: number) => void; // Callback to save conversation turn
+  onLocationRequest?: () => Promise<void>; // Callback to fetch and process location (lazy geocoding)
 }
 
 /**
@@ -60,6 +62,7 @@ export class QueryProcessor {
   private appToolQueryDecider: AppToolQueryDecider;
   private onRequestClarification?: () => void;
   private onConversationTurn?: (query: string, response: string, photoTimestamp?: number) => void;
+  private onLocationRequest?: () => Promise<void>;
   private pendingClarification: PendingClarification | null = null;
 
   constructor(config: QueryProcessorConfig) {
@@ -78,6 +81,7 @@ export class QueryProcessor {
     this.appToolQueryDecider = getAppToolQueryDecider();
     this.onRequestClarification = config.onRequestClarification;
     this.onConversationTurn = config.onConversationTurn;
+    this.onLocationRequest = config.onLocationRequest;
   }
 
   /**
@@ -187,6 +191,17 @@ export class QueryProcessor {
 
     try {
       console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📝 Query extracted: "${query}"`);
+
+      // LAZY GEOCODING: Only fetch location data when user asks location-related questions
+      // This saves ~4 API calls per query that doesn't need location
+      const locationQueryType = getLocationQueryType(query);
+      if (locationQueryType !== 'none' && this.onLocationRequest) {
+        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📍 Location query detected (${locationQueryType}) - fetching location...`);
+        await this.onLocationRequest();
+        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📍 Location data fetched`);
+      } else {
+        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📍 No location query detected - skipping geocoding APIs`);
+      }
 
       // Show the query being processed
       this.showProcessingMessage(query);

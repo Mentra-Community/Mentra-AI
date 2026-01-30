@@ -53,7 +53,7 @@ interface WeatherCache {
 }
 
 let weatherCache: WeatherCache | null = null;
-const CACHE_DURATION_MS = 10 * 60 * 1000; // 10 minutes
+const CACHE_DURATION_MS = 60 * 60 * 1000; // 1 hour
 const LOCATION_THRESHOLD = 0.01; // ~1km difference triggers new fetch
 
 /**

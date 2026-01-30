@@ -110,6 +110,18 @@ export class TranscriptionManager {
       wakeWordDetector: this.wakeWordDetector,
       onRequestClarification: () => this.startClarificationListening(),
       onConversationTurn,
+      // Lazy geocoding: Only fetch location when user asks location-related questions
+      onLocationRequest: async () => {
+        try {
+          const location = await this.session.location.getLatestLocation({ accuracy: "high" });
+          if (location) {
+            console.log(`[Session ${this.sessionId}]: 📍 Lazy geocoding - fetching location: lat=${location.lat}, lng=${location.lng}`);
+            await this.handleLocation(location);
+          }
+        } catch (error) {
+          console.warn(`[Session ${this.sessionId}]: ⚠️ Error fetching location for lazy geocoding:`, error);
+        }
+      },
     });
 
     // Use same settings as LiveCaptions for now
@@ -216,19 +228,10 @@ export class TranscriptionManager {
         // On error, continue processing (don't cancel)
       });
 
-      // Non-blocking location refresh on wake word
-      try {
-        this.session.location.getLatestLocation({accuracy: "high"}).then(location => {
-          if (location) {
-            console.log(`[Session ${this.sessionId}]: 📍 Wake-word location refresh received: lat=${location.lat}, lng=${location.lng}, accuracy=${location.accuracy}`);
-            this.handleLocation(location);
-          }
-        }, error => {
-          console.warn(`[Session ${this.sessionId}]: ⚠️ Error getting location on wake word:`, error);
-        });
-      } catch (error) {
-        console.warn(`[Session ${this.sessionId}]: ⚠️ Exception getting location on wake word:`, error);
-      }
+      // DISABLED: Location fetch moved to query processor (lazy geocoding)
+      // Only fetch location when user asks location-related questions
+      // This saves ~4 API calls per query that doesn't need location
+      // See: location-query-decider.ts and query.processor.ts
 
       // Start 15-second maximum listening timer
       this.maxListeningTimeoutId = setTimeout(() => {
