@@ -1,8 +1,8 @@
 "on":
   push:
     branches:
-      - main1
-name: "[prod] 🚀 Deploy to Porter.run"
+      - main
+name: "[dev] 🚀 Deploy to Porter.run"
 jobs:
   porter-deploy:
     runs-on: ubuntu-latest
@@ -18,7 +18,7 @@ jobs:
         timeout-minutes: 30
         run: exec porter apply -f ./porter.yaml
         env:
-          PORTER_APP_NAME: mira
+          PORTER_APP_NAME: mentra-ai-prod
           PORTER_NAMESPACE: prod
           NODE_ENV: production
           PORTER_CLUSTER: "4689"

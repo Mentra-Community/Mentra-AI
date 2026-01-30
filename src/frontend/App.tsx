@@ -1,6 +1,6 @@
 import React from 'react';
 import { useMentraAuth } from '@mentra/react';
-import ChatInterface from './screen/ChatInterface';
+import ChatInterface from './pages/ChatInterface';
 import AnimatedLogo from './components/AnimeLogo';
 
 /**
@@ -38,20 +38,20 @@ function App(): React.JSX.Element {
   }
 
   // Handle unauthenticated state
-  // if (!isAuthenticated || !userId) {
-  //   return (
-  //     <div className="min-h-screen flex flex-col bg-black">
-  //       <div className="flex flex-col items-center justify-center min-h-screen text-center p-8">
-  //         <h2 className="text-red-500 text-2xl font-semibold mb-4">Not Authenticated</h2>
-  //         <p className="text-gray-400">Please open this page from the MentraOS manager app to view your chat.</p>
-  //       </div>
-  //     </div>
-  //   );
-  // }
+  if (!isAuthenticated || !userId) {
+    return (
+      <div className="min-h-screen flex flex-col bg-black">
+        <div className="flex flex-col items-center justify-center min-h-screen text-center p-8">
+          <h2 className="text-red-500 text-2xl font-semibold mb-4">Not Authenticated</h2>
+          <p className="text-gray-400">Please open this page from the MentraOS manager app to view your chat.</p>
+        </div>
+      </div>
+    );
+  }
 
   // Authenticated - show chat interface with Mira assistant
   return (
-    <ChatInterface userId={userId} recipientId="mira-assistant" />
+    <ChatInterface userId={userId || ""} recipientId="mira-assistant" />
   );
 }
 
