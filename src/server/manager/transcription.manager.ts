@@ -7,7 +7,7 @@ import { TranscriptProcessor, getCancellationDecider, CancellationDecider, Cance
 import { ChatManager } from './chat.manager';
 import { notificationsManager } from './notifications.manager';
 import { PhotoManager } from './photo.manager';
-import { LocationService } from './location.service';
+import { LocationService, clearLocationCacheForSession } from './location.service';
 import { AudioPlaybackManager } from './audio-playback.manager';
 import { WakeWordDetector } from './wake-word.detector';
 import { QueryProcessor } from './query.processor';
@@ -867,6 +867,9 @@ export class TranscriptionManager {
     if (this.followUpTimeoutId) {
       clearTimeout(this.followUpTimeoutId);
     }
+
+    // Clean up location cache for this session to prevent memory leaks
+    clearLocationCacheForSession(this.sessionId);
   }
 }
 
