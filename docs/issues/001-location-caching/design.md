@@ -304,3 +304,76 @@ Only if Mentra AI runs on multiple server instances that need to share cache.
 - [ ] Optional: Add LRU eviction if map exceeds 10,000 entries
 - [ ] Update `getApiCallStats()` to include cache size metrics
 - [ ] Test with multiple concurrent simulated users
+
+---
+
+## Appendix: Reference Implementation
+
+The Dashboard app has a well-implemented weather caching system that demonstrates **Option C (Two-Tier Cache)** in production. This can serve as a reference for implementing location caching in Mentra AI.
+
+### Dashboard Weather Service (`apps/Dashboard/src/services/weather.service.ts`)
+
+```typescript
+// Two-tier caching: per-user + shared geographic
+export class WeatherService {
+  // Tier 1: Per-user cache (fast, personalized)
+  private perUserCache = new Map<string, CacheEntry>();
+
+  // Tier 2: Shared cross-user proximity cache with LRU eviction
+  private sharedCache = new Map<BucketKey, CacheEntry>();
+  private sharedLRU: BucketKey[] = [];
+
+  public async getWeather(session: AppSession, lat: number, long: number) {
+    // 1) Check per-user cache first
+    const userEntry = this.perUserCache.get(session.userId);
+    if (userEntry && userEntry.expiresAt > currentTime) {
+      if (this.withinKm(userEntry, { lat, lon: long }, PROXIMITY_KM)) {
+        return userEntry.weatherSummary; // Cache hit!
+      }
+    }
+
+    // 2) Check shared geographic cache (bucket-based using geohash)
+    const bucketKey = geohash.encode(lat, long, 5); // ~5km precision
+    let sharedEntry = this.sharedCache.get(bucketKey);
+    if (sharedEntry && sharedEntry.expiresAt > currentTime) {
+      // Also check neighbor buckets to reduce boundary misses
+      this.perUserCache.set(session.userId, sharedEntry); // Hydrate user cache
+      return sharedEntry.weatherSummary;
+    }
+
+    // 3) API call, then store in both caches
+    const summary = await this.fetchFromApi(lat, long);
+    this.upsertSharedCache(entry);
+    this.perUserCache.set(session.userId, entry);
+    return summary;
+  }
+
+  // LRU eviction for shared cache (max 1000 entries)
+  private upsertSharedCache(entry: CacheEntry) {
+    this.sharedCache.set(entry.bucketKey, entry);
+    // Move to end of LRU list
+    const idx = this.sharedLRU.indexOf(entry.bucketKey);
+    if (idx >= 0) this.sharedLRU.splice(idx, 1);
+    this.sharedLRU.push(entry.bucketKey);
+    // Evict oldest if over limit
+    while (this.sharedLRU.length > MAX_SHARED_CACHE_ENTRIES) {
+      const evict = this.sharedLRU.shift()!;
+      this.sharedCache.delete(evict);
+    }
+  }
+}
+```
+
+### Key Design Patterns from Dashboard
+
+| Feature | Implementation |
+|---------|----------------|
+| Per-user cache | `Map<userId, CacheEntry>` |
+| Geographic bucketing | `geohash.encode(lat, lng, 5)` (~5km cells) |
+| Neighbor checking | `geohash.neighbors(bucketKey)` to reduce boundary misses |
+| Distance validation | Haversine formula with 5km threshold |
+| LRU eviction | Array-based tracking, max 1000 entries |
+| TTL | 10 minute expiration (`expiresAt` timestamp) |
+| Cache hydration | Shared cache hits populate user cache |
+
+This is essentially **Option C** implemented well. For Mentra AI's location caching, we can start with the simpler **Option A** (per-user only) and evolve to this pattern if needed.
