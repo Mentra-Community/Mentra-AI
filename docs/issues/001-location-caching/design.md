@@ -6,7 +6,61 @@ This document presents the recommended solution for fixing the single-slot cachi
 
 ---
 
-## Solution: Per-User Cache
+## Root Problem: Unnecessary API Calls
+
+Before discussing caching, there's a more fundamental issue: **we're calling geocoding APIs on every location update, even when no one asked a question.**
+
+### Current Flow (Wasteful)
+
+```
+Location update → API call → Cache result → (user never asks anything)
+Location update → API call → Cache result → (user never asks anything)
+Location update → API call → Cache result → (user never asks anything)
+Location update → API call → Cache result → User says "Hey Mentra" → Use cached result
+```
+
+### Better Flow (Lazy Hydration)
+
+```
+Location update → Store lat/lng only (no API call)
+Location update → Store lat/lng only (no API call)
+Location update → Store lat/lng only (no API call)
+User says "Hey Mentra" → API call → Inject into prompt
+```
+
+**Only call the geocoding API when the user triggers the wake word and we actually need to inject location context into the prompt.**
+
+This alone could reduce API calls by 90%+ since most location updates don't result in user queries.
+
+---
+
+## Solution: Lazy Hydration + Per-User Cache
+
+### Part 1: Lazy Hydration (Primary Fix)
+
+Only call geocoding APIs when:
+1. User says "Hey Mentra" (wake word detected)
+2. We need to build the prompt with location context
+3. We don't have a recent cached result for this user
+
+```typescript
+// On location update: just store coordinates, NO API call
+handleLocationUpdate(lat: number, lng: number) {
+  this.lastCoordinates = { lat, lng, timestamp: Date.now() };
+  // That's it. No geocoding API call here.
+}
+
+// On wake word: hydrate location context if needed
+async onWakeWord() {
+  if (this.needsLocationContext()) {
+    const { lat, lng } = this.lastCoordinates;
+    // NOW we call the API, right before building the prompt
+    this.locationContext = await this.geocodeIfNeeded(lat, lng);
+  }
+}
+```
+
+### Part 2: Per-User Cache (Secondary Fix)
 
 ### Description
 
@@ -69,6 +123,13 @@ The current invalidation logic is good and should be preserved:
 
 ## Implementation Checklist
 
+### Lazy Hydration
+- [ ] Remove geocoding API calls from `handleLocationUpdate()`
+- [ ] Store only raw coordinates on location updates
+- [ ] Move geocoding to wake word handler / prompt building phase
+- [ ] Only geocode if we don't have recent valid cache for user
+
+### Per-User Cache
 - [ ] Replace `let geocodingCache` with `Map<string, GeocodingCache>`
 - [ ] Replace `let timezoneCache` with `Map<string, TimezoneCache>`
 - [ ] Update `isGeocodingCacheValid()` to take sessionId and look up from Map
