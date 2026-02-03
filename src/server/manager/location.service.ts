@@ -33,9 +33,9 @@ interface TimezoneCache {
   lng: number;
 }
 
-// Cache instances (module-level for persistence across calls)
-let geocodingCache: GeocodingCache | null = null;
-let timezoneCache: TimezoneCache | null = null;
+// Cache instances (per-session to prevent cache collisions between concurrent users)
+const geocodingCacheBySession = new Map<string, GeocodingCache>();
+const timezoneCacheBySession = new Map<string, TimezoneCache>();
 
 // Cache durations
 const GEOCODING_CACHE_DURATION_MS = 10 * 60 * 1000; // 10 minutes
@@ -55,33 +55,46 @@ const apiCallStats = {
   timezoneCacheHits: 0
 };
 
-// Helper: Check if geocoding cache is valid
-function isGeocodingCacheValid(lat: number, lng: number): boolean {
-  if (!geocodingCache) return false;
+// Helper: Check if geocoding cache is valid for a specific session
+function isGeocodingCacheValid(sessionId: string, lat: number, lng: number): boolean {
+  const cache = geocodingCacheBySession.get(sessionId);
+  if (!cache) return false;
 
   const now = Date.now();
-  const isExpired = (now - geocodingCache.timestamp) > GEOCODING_CACHE_DURATION_MS;
-  const locationChanged = Math.abs(geocodingCache.lat - lat) > GEOCODING_LOCATION_THRESHOLD ||
-                          Math.abs(geocodingCache.lng - lng) > GEOCODING_LOCATION_THRESHOLD;
+  const isExpired = (now - cache.timestamp) > GEOCODING_CACHE_DURATION_MS;
+  const locationChanged = Math.abs(cache.lat - lat) > GEOCODING_LOCATION_THRESHOLD ||
+                          Math.abs(cache.lng - lng) > GEOCODING_LOCATION_THRESHOLD;
 
   return !isExpired && !locationChanged;
 }
 
-// Helper: Check if timezone cache is valid
-function isTimezoneCacheValid(lat: number, lng: number): boolean {
-  if (!timezoneCache) return false;
+// Helper: Check if timezone cache is valid for a specific session
+function isTimezoneCacheValid(sessionId: string, lat: number, lng: number): boolean {
+  const cache = timezoneCacheBySession.get(sessionId);
+  if (!cache) return false;
 
   const now = Date.now();
-  const isExpired = (now - timezoneCache.timestamp) > TIMEZONE_CACHE_DURATION_MS;
-  const locationChanged = Math.abs(timezoneCache.lat - lat) > TIMEZONE_LOCATION_THRESHOLD ||
-                          Math.abs(timezoneCache.lng - lng) > TIMEZONE_LOCATION_THRESHOLD;
+  const isExpired = (now - cache.timestamp) > TIMEZONE_CACHE_DURATION_MS;
+  const locationChanged = Math.abs(cache.lat - lat) > TIMEZONE_LOCATION_THRESHOLD ||
+                          Math.abs(cache.lng - lng) > TIMEZONE_LOCATION_THRESHOLD;
 
   return !isExpired && !locationChanged;
 }
 
 // Export stats for monitoring
 export function getApiCallStats() {
-  return { ...apiCallStats };
+  return {
+    ...apiCallStats,
+    geocodingCacheSize: geocodingCacheBySession.size,
+    timezoneCacheSize: timezoneCacheBySession.size
+  };
+}
+
+// Clean up cache entries for a specific session (call on session end to prevent memory leaks)
+export function clearLocationCacheForSession(sessionId: string): void {
+  geocodingCacheBySession.delete(sessionId);
+  timezoneCacheBySession.delete(sessionId);
+  console.log(`[LocationCache] 🗑️ Cleared cache for session ${sessionId} - Remaining: geocoding=${geocodingCacheBySession.size}, timezone=${timezoneCacheBySession.size}`);
 }
 
 export function resetApiCallStats() {
@@ -185,28 +198,29 @@ export class LocationService {
    * Uses caching to prevent excessive API calls
    */
   private async enrichWithGeocoding(lat: number, lng: number, locationInfo: LocationContext): Promise<void> {
-    // Check cache first
-    if (isGeocodingCacheValid(lat, lng)) {
+    // Check cache first (per-session cache)
+    const cachedGeocoding = geocodingCacheBySession.get(this.sessionId);
+    if (isGeocodingCacheValid(this.sessionId, lat, lng)) {
       apiCallStats.geocodingCacheHits++;
-      const cacheAge = Math.round((Date.now() - geocodingCache!.timestamp) / 1000);
-      console.log(`[Geocoding] 📦 CACHED - Using cached geocoding data (${cacheAge}s old)`);
+      const cacheAge = Math.round((Date.now() - cachedGeocoding!.timestamp) / 1000);
+      console.log(`[Geocoding] 📦 CACHED - Using cached geocoding data (${cacheAge}s old) for session ${this.sessionId}`);
 
       // Apply cached Google Maps data
-      if (geocodingCache!.googleMaps) {
-        locationInfo.streetAddress = geocodingCache!.googleMaps.streetAddress;
-        locationInfo.neighborhood = geocodingCache!.googleMaps.neighborhood;
+      if (cachedGeocoding!.googleMaps) {
+        locationInfo.streetAddress = cachedGeocoding!.googleMaps.streetAddress;
+        locationInfo.neighborhood = cachedGeocoding!.googleMaps.neighborhood;
       }
 
       // Apply cached LocationIQ data
-      if (geocodingCache!.locationIQ) {
-        locationInfo.city = geocodingCache!.locationIQ.city;
-        locationInfo.state = geocodingCache!.locationIQ.state;
-        locationInfo.country = geocodingCache!.locationIQ.country;
+      if (cachedGeocoding!.locationIQ) {
+        locationInfo.city = cachedGeocoding!.locationIQ.city;
+        locationInfo.state = cachedGeocoding!.locationIQ.state;
+        locationInfo.country = cachedGeocoding!.locationIQ.country;
       }
       return;
     }
 
-    console.log(`[Geocoding] 🌐 FETCHING FROM API - ${!geocodingCache ? 'No cache exists' : 'Cache expired or location changed'}`);
+    console.log(`[Geocoding] 🌐 FETCHING FROM API - ${!cachedGeocoding ? 'No cache exists' : 'Cache expired or location changed'} for session ${this.sessionId}`);
 
     // Initialize cache entry
     const newCache: GeocodingCache = {
@@ -278,9 +292,9 @@ export class LocationService {
       console.warn('[Geocoding] LocationIQ failed:', geocodingError);
     }
 
-    // Update the cache
-    geocodingCache = newCache;
-    console.log(`[Geocoding] 💾 Cache updated - API calls: Google=${apiCallStats.googleMapsGeocoding}, LocationIQ=${apiCallStats.locationIQGeocoding}, CacheHits=${apiCallStats.geocodingCacheHits}`);
+    // Update the cache (per-session)
+    geocodingCacheBySession.set(this.sessionId, newCache);
+    console.log(`[Geocoding] 💾 Cache updated for session ${this.sessionId} - API calls: Google=${apiCallStats.googleMapsGeocoding}, LocationIQ=${apiCallStats.locationIQGeocoding}, CacheHits=${apiCallStats.geocodingCacheHits}`);
   }
 
   /**
@@ -288,16 +302,17 @@ export class LocationService {
    * Uses caching to prevent excessive API calls (timezones rarely change)
    */
   private async enrichWithTimezone(lat: number, lng: number, locationInfo: LocationContext): Promise<void> {
-    // Check cache first - timezones are very stable, use longer cache
-    if (isTimezoneCacheValid(lat, lng)) {
+    // Check cache first - timezones are very stable, use longer cache (per-session)
+    const cachedTimezone = timezoneCacheBySession.get(this.sessionId);
+    if (isTimezoneCacheValid(this.sessionId, lat, lng)) {
       apiCallStats.timezoneCacheHits++;
-      const cacheAge = Math.round((Date.now() - timezoneCache!.timestamp) / 1000);
-      console.log(`[Timezone] 📦 CACHED - Using cached timezone data (${cacheAge}s old)`);
-      locationInfo.timezone = timezoneCache!.timezone;
+      const cacheAge = Math.round((Date.now() - cachedTimezone!.timestamp) / 1000);
+      console.log(`[Timezone] 📦 CACHED - Using cached timezone data (${cacheAge}s old) for session ${this.sessionId}`);
+      locationInfo.timezone = cachedTimezone!.timezone;
       return;
     }
 
-    console.log(`[Timezone] 🌐 FETCHING FROM API - ${!timezoneCache ? 'No cache exists' : 'Cache expired or location changed significantly'}`);
+    console.log(`[Timezone] 🌐 FETCHING FROM API - ${!cachedTimezone ? 'No cache exists' : 'Cache expired or location changed significantly'} for session ${this.sessionId}`);
 
     let timezoneSuccess = false;
 
@@ -349,15 +364,15 @@ export class LocationService {
       }
     }
 
-    // Update cache if we got a valid timezone
+    // Update cache if we got a valid timezone (per-session)
     if (timezoneSuccess) {
-      timezoneCache = {
+      timezoneCacheBySession.set(this.sessionId, {
         timezone: locationInfo.timezone,
         timestamp: Date.now(),
         lat,
         lng
-      };
-      console.log(`[Timezone] 💾 Cache updated - API calls: LocationIQ=${apiCallStats.locationIQTimezone}, Google=${apiCallStats.googleMapsTimezone}, CacheHits=${apiCallStats.timezoneCacheHits}`);
+      });
+      console.log(`[Timezone] 💾 Cache updated for session ${this.sessionId} - API calls: LocationIQ=${apiCallStats.locationIQTimezone}, Google=${apiCallStats.googleMapsTimezone}, CacheHits=${apiCallStats.timezoneCacheHits}`);
     }
   }
 
