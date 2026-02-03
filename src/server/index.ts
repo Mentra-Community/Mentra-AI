@@ -54,6 +54,11 @@ if (!PACKAGE_NAME) {
 const logger = _logger.child({app: PACKAGE_NAME});
 logger.info(`🚀🚀🚀 Starting ${PACKAGE_NAME} server on port ${PORT}... 🚀🚀🚀`);
 
+// Debug: Log BetterStack token status
+const bsToken = process.env.BETTERSTACK_SOURCE_TOKEN;
+const bsEndpoint = process.env.BETTERSTACK_ENDPOINT || "https://s1311181.eu-nbg-2.betterstackdata.com";
+logger.info({ hasToken: !!bsToken, endpoint: bsEndpoint }, `📊 BetterStack Configuration Check`);
+
 /**
  * Main Mira TPA server class
  */
@@ -130,8 +135,8 @@ class MiraServer extends AppServer {
    */
   protected async onSession(session: AppSession, sessionId: string, userId: string): Promise<void> {
     const logger = session.logger.child({ service: 'Mira.MiraServer' });
-    logger.info(`Setting up Mira service for session ${sessionId}, user ${userId}`);
-
+    logger.info(`Setting up Mentra AI service for session ${sessionId}, user ${userId}`);
+    logger.info(`testing right now`)
     // Initialize user settings with defaults if they don't exist
     try {
       await this.dbAPI.initializeUserSettings(userId);
@@ -154,7 +159,7 @@ class MiraServer extends AppServer {
     let agent = this.agentPerUser.get(userId);
     if (!agent) {
       logger.info(`Creating new MiraAgent for user ${userId}`);
-      agent = new MiraAgent(cleanServerUrl, userId);
+      agent = new MiraAgent(cleanServerUrl, userId, session.logger);
       this.agentPerUser.set(userId, agent);
 
       // Start fetching tools asynchronously without blocking
@@ -169,6 +174,8 @@ class MiraServer extends AppServer {
       });
     } else {
       logger.info(`Reusing existing MiraAgent for user ${userId} (conversation history preserved)`);
+      // Update logger for the reused agent to use the current session's logger
+      agent.setLogger(session.logger);
     }
 
     this.agentPerSession.set(sessionId, agent);

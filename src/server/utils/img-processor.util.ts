@@ -1,11 +1,13 @@
 // src/utils/analyzeImage.ts
-import { GoogleGenAI, Modality } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import * as fs from "node:fs";
+import { logger as _logger } from "@mentra/sdk";
+import type { Logger } from "pino";
 
 const GEMENI_API_KEY = process.env.GEMENI_API_KEY;
 
 if (!GEMENI_API_KEY) {
-  console.error("❌ GEMENI_API_KEY environment variable is not set!");
+  _logger.error("GEMENI_API_KEY environment variable is not set");
   process.exit(1);
 }
 
@@ -13,27 +15,25 @@ if (!GEMENI_API_KEY) {
  * Analyze an image using Google GenAI.
  * @param imagePath - Path to the image file.
  * @param question - The question or prompt to ask about the image.
- * @param model - (Optional) Model name to use. Default: "gemma-3-4b-it".
+ * @param model - (Optional) Model name to use. Default: "gemini-flash-lite-latest".
+ * @param logger - (Optional) Logger instance for BetterStack logging.
  * @returns The AI's text response.
  */
 
 export async function analyzeImage(
   imagePath: string,
   question: string,
-  // model = "gemma-3-4b-it"
-  // model = "gemma-3-12b-it"
-  // model = "gemma-3-27b-it"
-  // model = "gemini-2.5-flash-image"
-  // model = "gemini-flash-latest"
-  model = "gemini-flash-lite-latest"
-
-
-
-
-
+  model = "gemini-flash-lite-latest",
+  logger?: Logger
 ): Promise<string | null> {
+  const log = logger || _logger.child({ service: "GeminiAPI" });
   const startTime = Date.now();
   const ai = new GoogleGenAI({ apiKey: GEMENI_API_KEY });
+
+  log.info(
+    { model, questionLength: question.length, apiType: 'Gemini', operation: 'analyzeImage' },
+    `🤖 Calling Gemini API for image analysis with model: ${model}`
+  );
 
   const prompt = `
   Context:
@@ -48,8 +48,6 @@ export async function analyzeImage(
   Query:
   "${question}"
   `;
-
-  console.log(`⏳ Analyzing image with prompt: "${question}"\n`);
 
   const promptStartTime = Date.now();
   const imageData = fs.readFileSync(imagePath).toString("base64");
@@ -83,27 +81,33 @@ export async function analyzeImage(
     for (const part of response.candidates[0].content.parts) {
       if (part.text) {
         textResponse = part.text;
-        console.log("Text response:", part.text);
       } else if (part.inlineData) {
         const imgData = part.inlineData.data;
         if (typeof imgData === "string") {
           const buffer = Buffer.from(imgData, "base64");
           fs.writeFileSync("gemini-native-image.png", buffer);
-          console.log("✓ Image saved as gemini-native-image.png");
-          console.log(`✓ Image size: ${Math.round(buffer.length / 1024)}KB`);
         }
       }
     }
   } else {
-    console.error("Response does not contain expected candidates or content.");
+    log.error({ model, apiType: 'Gemini', operation: 'analyzeImage', success: false }, "Response does not contain expected candidates or content");
   }
 
   const totalTime = promptEndTime - startTime;
   const llmTime = promptEndTime - promptStartTime;
 
-  console.log(`\n⏱️  TIMING RESULTS:`);
-  console.log(`   • LLM processing: ${llmTime}ms`);
-  console.log(`   • Total time: ${totalTime}ms (${(totalTime / 1000).toFixed(2)}s)`);
+  log.info(
+    {
+      model,
+      llmTimeMs: llmTime,
+      totalTimeMs: totalTime,
+      responseLength: textResponse?.length || 0,
+      success: true,
+      apiType: 'Gemini',
+      operation: 'analyzeImage'
+    },
+    `✅ Gemini API call successful (${llmTime}ms LLM + ${totalTime}ms total)`
+  );
 
   return textResponse;
 }
