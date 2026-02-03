@@ -1,4 +1,5 @@
 import { logger as _logger } from '@mentra/sdk';
+import type { Logger } from 'pino';
 import { reverseGeocode, getTimezone } from '../utils/map.util';
 import { getWeather, WeatherCondition } from '../utils/weather.util';
 
@@ -131,9 +132,11 @@ export interface LocationContext {
  */
 export class LocationService {
   private sessionId: string;
+  private logger: Logger;
 
-  constructor(sessionId: string) {
+  constructor(sessionId: string, logger?: Logger) {
     this.sessionId = sessionId;
+    this.logger = logger || _logger.child({ service: 'LocationService' });
   }
 
   /**
@@ -141,7 +144,7 @@ export class LocationService {
    * Gracefully falls back to default values if location services fail
    */
   async processLocation(locationData: any): Promise<LocationContext> {
-    logger.debug({ locationData }, "$$$$$ Location data:");
+    this.logger.debug({ locationData }, "$$$$$ Location data:");
 
     // Default fallback location context
     const fallbackLocationContext: LocationContext = {
@@ -163,7 +166,7 @@ export class LocationService {
       const { lat, lng } = locationData;
 
       if (!lat || !lng) {
-        logger.debug('Invalid location data received, using fallback');
+        this.logger.debug('Invalid location data received, using fallback');
         return fallbackLocationContext;
       }
 
@@ -184,11 +187,11 @@ export class LocationService {
       // Get weather information
       await this.enrichWithWeather(lat, lng, locationInfo);
 
-      logger.debug(`User location: ${locationInfo.city}, ${locationInfo.state}, ${locationInfo.country} (${locationInfo.lat}, ${locationInfo.lng}), Timezone: ${locationInfo.timezone.name}, Weather: ${locationInfo.weather?.condition || 'Unknown'}`);
+      this.logger.debug(`User location: ${locationInfo.city}, ${locationInfo.state}, ${locationInfo.country} (${locationInfo.lat}, ${locationInfo.lng}), Timezone: ${locationInfo.timezone.name}, Weather: ${locationInfo.weather?.condition || 'Unknown'}`);
 
       return locationInfo;
     } catch (error) {
-      logger.error(error, 'Error processing location:');
+      this.logger.error(error, 'Error processing location:');
       return fallbackLocationContext;
     }
   }
@@ -235,7 +238,7 @@ export class LocationService {
     try {
       console.log(`[Geocoding] Attempting Google Maps for (${lat}, ${lng})`);
       apiCallStats.googleMapsGeocoding++;
-      const googleResult = await reverseGeocode(lat, lng);
+      const googleResult = await reverseGeocode(lat, lng, this.logger);
 
       if (googleResult.success && googleResult.address) {
         const addr = googleResult.address;
@@ -350,7 +353,7 @@ export class LocationService {
       try {
         console.log(`[Timezone] Attempting Google Maps timezone lookup`);
         apiCallStats.googleMapsTimezone++;
-        const googleTimezone = await getTimezone(lat, lng);
+        const googleTimezone = await getTimezone(lat, lng, this.logger);
 
         if (googleTimezone.success && googleTimezone.timezone) {
           locationInfo.timezone = googleTimezone.timezone;
@@ -387,7 +390,7 @@ export class LocationService {
         : undefined;
 
       console.log(`[Weather] Fetching weather for ${locationName || `${lat}, ${lng}`}`);
-      const weatherResult = await getWeather(lat, lng, locationName);
+      const weatherResult = await getWeather(lat, lng, locationName, this.logger);
 
       if (weatherResult.success && weatherResult.current) {
         locationInfo.weather = weatherResult.current;

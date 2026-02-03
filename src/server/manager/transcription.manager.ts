@@ -92,7 +92,7 @@ export class TranscriptionManager {
 
     // Initialize extracted services
     this.photoManager = new PhotoManager(session, sessionId);
-    this.locationService = new LocationService(sessionId);
+    this.locationService = new LocationService(sessionId, session.logger);
     this.audioManager = new AudioPlaybackManager(session, sessionId);
     this.wakeWordDetector = new WakeWordDetector();
     this.cancellationDecider = getCancellationDecider();

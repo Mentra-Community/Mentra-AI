@@ -4,6 +4,9 @@
  * API Docs: https://developers.google.com/maps/documentation/weather
  */
 
+import { logger as _logger } from "@mentra/sdk";
+import type { Logger } from "pino";
+
 /**
  * Weather condition information
  */
@@ -81,28 +84,39 @@ function isCacheValid(lat: number, lng: number): boolean {
 export async function getWeather(
   lat: number,
   lng: number,
-  locationName?: string
+  locationName?: string,
+  logger?: Logger
 ): Promise<WeatherResponse> {
+  const log = logger || _logger.child({ service: "GoogleWeatherAPI" });
+
   try {
     // Check cache first
     if (isCacheValid(lat, lng)) {
-      console.log(`[Weather] 📦 CACHED - Using cached weather data (${Math.round((Date.now() - weatherCache!.timestamp) / 1000)}s old)`);
+      const cacheAgeSeconds = Math.round((Date.now() - weatherCache!.timestamp) / 1000);
+      log.info(
+        { lat, lng, cacheAgeSeconds, locationName, fromCache: true, apiType: 'GoogleWeather', operation: 'getWeather', success: true },
+        `📦 Weather data retrieved from cache (${cacheAgeSeconds}s old)`
+      );
       return weatherCache!.data;
     }
-
-    console.log(`[Weather] 🌐 FETCHING FROM API - ${!weatherCache ? 'No cache exists' : 'Cache expired or location changed'}`);
 
     const apiKey = process.env.GOOGLE_WEATHER_API_KEY;
 
     if (!apiKey) {
-      console.error('[Weather] GOOGLE_WEATHER_API_KEY is not configured');
+      log.error(
+        { lat, lng, apiType: 'GoogleWeather', operation: 'getWeather', success: false },
+        'GOOGLE_WEATHER_API_KEY is not configured'
+      );
       return {
         success: false,
         error: 'Weather API key is not configured'
       };
     }
 
-    console.log(`[Weather] Fetching weather from Google Weather API for: ${locationName || `${lat}, ${lng}`}`);
+    log.info(
+      { lat, lng, locationName, fromCache: false, apiType: 'GoogleWeather', operation: 'getWeather' },
+      `🌐 Calling Google Weather API for: ${locationName || `${lat}, ${lng}`}`
+    );
 
     const url = `https://weather.googleapis.com/v1/currentConditions:lookup?key=${apiKey}&location.latitude=${lat}&location.longitude=${lng}`;
 
@@ -115,7 +129,10 @@ export async function getWeather(
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.warn(`[Weather] Google Weather API responded with status ${response.status}: ${errorText}`);
+      log.error(
+        { lat, lng, status: response.status, error: errorText, apiType: 'GoogleWeather', operation: 'getWeather', success: false },
+        `❌ Google Weather API responded with status ${response.status}`
+      );
       return {
         success: false,
         error: `API error: ${response.status}`
@@ -142,7 +159,10 @@ export async function getWeather(
       precipitation: precipitation ? `${precipitation}% chance` : undefined,
     };
 
-    console.log(`[Weather] Success: ${tempFahrenheit}°F (${tempCelsius}°C), ${condition}, Humidity: ${humidity}%, Wind: ${windSpeed} mph ${windDir}`);
+    log.info(
+      { tempF: tempFahrenheit, tempC: tempCelsius, condition, lat, lng, apiType: 'GoogleWeather', operation: 'getWeather', success: true },
+      `✅ Google Weather API successful: ${tempFahrenheit}°F (${tempCelsius}°C), ${condition}`
+    );
 
     const result: WeatherResponse = {
       success: true,
@@ -161,7 +181,10 @@ export async function getWeather(
     return result;
 
   } catch (error) {
-    console.error('[Weather] Error fetching weather:', error);
+    log.error(
+      { lat, lng, locationName, error: error instanceof Error ? error.message : String(error), apiType: 'GoogleWeather', operation: 'getWeather', success: false },
+      `❌ Error fetching weather`
+    );
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
