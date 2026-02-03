@@ -16,7 +16,8 @@ import { AppManagementAgent } from "./AppManagementAgent";
 
 import { ThinkingTool } from "./tools/ThinkingTool";
 import { Calculator } from "@langchain/community/tools/calculator";
-import { AppServer, PhotoData, GIVE_APP_CONTROL_OF_TOOL_RESPONSE } from "@mentra/sdk";
+import { AppServer, PhotoData, GIVE_APP_CONTROL_OF_TOOL_RESPONSE, logger as _logger } from "@mentra/sdk";
+import type { Logger } from "pino";
 import { analyzeImage } from "../utils/img-processor.util";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -61,6 +62,7 @@ export class MiraAgent implements Agent {
   private appManagementAgent: AppManagementAgent;
   private userId: string;
   private personality: PersonalityType = 'default';
+  private logger: Logger;
 
   public messages: BaseMessage[] = [];
   private conversationHistory: ConversationTurn[] = [];
@@ -106,8 +108,9 @@ export class MiraAgent implements Agent {
     weather: undefined
   };
 
-  constructor(cloudUrl: string, userId: string) {
+  constructor(cloudUrl: string, userId: string, logger?: Logger) {
     this.userId = userId;
+    this.logger = logger || _logger.child({ service: 'MiraAgent' });
 
     // Initialize the specialized app management agent
     this.appManagementAgent = new AppManagementAgent(cloudUrl, userId);
@@ -259,6 +262,13 @@ export class MiraAgent implements Agent {
    */
   public clearConversationHistory(): void {
     this.conversationHistory = [];
+  }
+
+  /**
+   * Set the logger instance for this agent (called when session is established)
+   */
+  public setLogger(logger: Logger): void {
+    this.logger = logger;
   }
 
   /**
@@ -1367,7 +1377,7 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
           fs.writeFileSync(tempImagePath, photo.buffer);
 
           // Run image analysis
-          const imageAnalysisResult = await analyzeImage(tempImagePath, query);
+          const imageAnalysisResult = await analyzeImage(tempImagePath, query, "gemini-flash-lite-latest", this.logger);
 
           console.log(`⏱️  [+${Date.now() - startTime}ms] ✅ Image analysis complete (took ${Date.now() - imageAnalysisStart}ms)`);
           console.log(`🤖 Image answer:`, imageAnalysisResult);

@@ -4,6 +4,8 @@
  */
 
 import { Client } from '@googlemaps/google-maps-services-js';
+import { logger as _logger } from "@mentra/sdk";
+import type { Logger } from "pino";
 
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
 
@@ -49,14 +51,18 @@ export interface GoogleMapsGeocodeResult {
  * @param lng - Longitude
  * @returns Detailed address information including street and neighborhood/area
  */
-export async function reverseGeocode(lat: number, lng: number): Promise<GoogleMapsGeocodeResult> {
+export async function reverseGeocode(lat: number, lng: number, logger?: Logger): Promise<GoogleMapsGeocodeResult> {
+  const log = logger || _logger.child({ service: "GoogleMapsAPI" });
+
   if (!GOOGLE_MAPS_API_KEY) {
-    console.warn('GOOGLE_MAPS_API_KEY not configured, skipping Google Maps geocoding');
+    log.warn({ lat, lng }, 'GOOGLE_MAPS_API_KEY not configured, skipping reverse geocoding');
     return {
       success: false,
       error: 'API key not configured'
     };
   }
+
+  log.info({ lat, lng, apiType: 'GoogleMaps', operation: 'reverseGeocode' }, '📍 Calling Google Maps reverse geocoding API');
 
   try {
     // Call the reverse geocoding API using the official client
@@ -69,7 +75,10 @@ export async function reverseGeocode(lat: number, lng: number): Promise<GoogleMa
     });
 
     if (response.data.status !== 'OK') {
-      console.warn(`Google Maps Geocoding failed with status: ${response.data.status}`);
+      log.error(
+        { lat, lng, status: response.data.status, apiType: 'GoogleMaps', operation: 'reverseGeocode', success: false },
+        `❌ Google Maps reverse geocoding failed with status: ${response.data.status}`
+      );
       return {
         success: false,
         error: response.data.status
@@ -77,6 +86,7 @@ export async function reverseGeocode(lat: number, lng: number): Promise<GoogleMa
     }
 
     if (!response.data.results || response.data.results.length === 0) {
+      log.warn({ lat, lng }, '⚠️ No reverse geocoding results found');
       return {
         success: false,
         error: 'No results found'
@@ -120,22 +130,37 @@ export async function reverseGeocode(lat: number, lng: number): Promise<GoogleMa
     // Build street address (number + street name)
     const streetAddress = [streetNumber, route].filter(Boolean).join(' ') || undefined;
 
+    const address: GoogleMapsAddress = {
+      formattedAddress: result.formatted_address,
+      streetAddress: streetAddress,
+      neighborhood: neighborhood || undefined,
+      postalCode: postalCode || undefined,
+    };
+
+    log.info(
+      {
+        lat,
+        lng,
+        formattedAddress: address.formattedAddress,
+        hasStreetAddress: !!address.streetAddress,
+        hasNeighborhood: !!address.neighborhood,
+        success: true,
+        apiType: 'GoogleMaps',
+        operation: 'reverseGeocode'
+      },
+      `✅ Google Maps reverse geocoding successful: ${address.formattedAddress}`
+    );
+
     return {
       success: true,
-      address: {
-        formattedAddress: result.formatted_address,
-        streetAddress: streetAddress,
-        neighborhood: neighborhood || undefined,
-        // city: city || 'Unknown',
-        // state: state || 'Unknown',
-        // country: country || 'Unknown',
-        postalCode: postalCode || undefined,
-        // coordinates: { lat, lng }
-      }
+      address
     };
 
   } catch (error) {
-    console.error('Google Maps reverse geocoding error:', error);
+    log.error(
+      { lat, lng, error: error instanceof Error ? error.message : String(error) },
+      `❌ Google Maps reverse geocoding error`
+    );
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -150,7 +175,7 @@ export async function reverseGeocode(lat: number, lng: number): Promise<GoogleMa
  * @param lng - Longitude
  * @returns Timezone information including name, offset, and DST status
  */
-export async function getTimezone(lat: number, lng: number): Promise<{
+export async function getTimezone(lat: number, lng: number, logger?: Logger): Promise<{
   success: boolean;
   timezone?: {
     name: string;
@@ -161,13 +186,17 @@ export async function getTimezone(lat: number, lng: number): Promise<{
   };
   error?: string;
 }> {
+  const log = logger || _logger.child({ service: "GoogleMapsAPI" });
+
   if (!GOOGLE_MAPS_API_KEY) {
-    console.warn('GOOGLE_MAPS_API_KEY not configured, skipping Google Maps timezone lookup');
+    log.warn({ lat, lng }, 'GOOGLE_MAPS_API_KEY not configured, skipping timezone lookup');
     return {
       success: false,
       error: 'API key not configured'
     };
   }
+
+  log.info({ lat, lng, apiType: 'GoogleMaps', operation: 'timezone' }, '🕐 Calling Google Maps timezone API');
 
   try {
     const timestamp = Math.floor(Date.now() / 1000); // Current Unix timestamp
@@ -181,7 +210,10 @@ export async function getTimezone(lat: number, lng: number): Promise<{
     });
 
     if (response.data.status !== 'OK') {
-      console.warn(`Google Maps TimeZone API failed with status: ${response.data.status}`);
+      log.error(
+        { lat, lng, status: response.data.status, apiType: 'GoogleMaps', operation: 'timezone', success: false },
+        `❌ Google Maps timezone API failed with status: ${response.data.status}`
+      );
       return {
         success: false,
         error: response.data.status
@@ -195,19 +227,38 @@ export async function getTimezone(lat: number, lng: number): Promise<{
     // Format short timezone name (e.g., "PST", "PDT")
     const shortName = data.timeZoneName || data.timeZoneId || 'Unknown';
 
+    const timezone = {
+      name: data.timeZoneId || 'Unknown',
+      shortName: shortName,
+      fullName: data.timeZoneId || 'Unknown',
+      offsetSec: offsetSec,
+      isDst: isDst
+    };
+
+    log.info(
+      {
+        lat,
+        lng,
+        timezone: timezone.name,
+        offset: timezone.offsetSec,
+        isDst: timezone.isDst,
+        success: true,
+        apiType: 'GoogleMaps',
+        operation: 'timezone'
+      },
+      `✅ Google Maps timezone lookup successful: ${timezone.shortName}`
+    );
+
     return {
       success: true,
-      timezone: {
-        name: data.timeZoneId || 'Unknown',
-        shortName: shortName,
-        fullName: data.timeZoneId || 'Unknown',
-        offsetSec: offsetSec,
-        isDst: isDst
-      }
+      timezone
     };
 
   } catch (error) {
-    console.error('Google Maps timezone lookup error:', error);
+    log.error(
+      { lat, lng, error: error instanceof Error ? error.message : String(error) },
+      `❌ Google Maps timezone lookup error`
+    );
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
