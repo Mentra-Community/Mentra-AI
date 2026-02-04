@@ -96,6 +96,10 @@ class MiraServer extends AppServer {
   private setupRoutes(): void {
     const app = this.getExpressApp();
 
+    // Serve static files from the public directory (for both dev and production)
+    const publicPath = path.join(__dirname, '../public');
+    app.use(express.static(publicPath));
+
     // Serve static files from the built frontend (in production)
     if (process.env.NODE_ENV === 'production') {
       const staticPath = path.join(__dirname, '../../dist/frontend');
