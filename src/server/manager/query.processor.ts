@@ -371,7 +371,16 @@ export class QueryProcessor {
       // Use CameraQuestionAgent for vision queries if available
       if (isVisionQuery && this.cameraQuestionAgent) {
         console.log(`⏱️  [+${agentStartTime - processQueryStartTime}ms] 📷 Routing to CameraQuestionAgent...`);
-        agentResponse = await this.cameraQuestionAgent.handleContext(inputData);
+
+        // Build location context string for camera agent
+        const loc = this.miraAgent.getLocationContext();
+        const locationParts: string[] = [];
+        if (loc.streetAddress) locationParts.push(`on ${loc.streetAddress}`);
+        if (loc.neighborhood) locationParts.push(`in the ${loc.neighborhood} area`);
+        if (loc.city !== 'Unknown') locationParts.push(`in ${loc.city}, ${loc.state}, ${loc.country}`);
+        const locationContext = locationParts.length > 0 ? locationParts.join(', ') : undefined;
+
+        agentResponse = await this.cameraQuestionAgent.handleContext({ ...inputData, locationContext });
         const agentEndTime = Date.now();
         console.log(`⏱️  [+${agentEndTime - processQueryStartTime}ms] ✅ CameraQuestionAgent completed (took ${agentEndTime - agentStartTime}ms)`);
 

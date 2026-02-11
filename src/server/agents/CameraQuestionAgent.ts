@@ -295,6 +295,7 @@ export class CameraQuestionAgent implements Agent {
     const query = userContext.query || "";
     let photo = userContext.photo as PhotoData | null;
     const getPhotoCallback = userContext.getPhotoCallback as (() => Promise<PhotoData | null>) | undefined;
+    const locationContext = userContext.locationContext as string | undefined;
 
     // Step 1: Classify the query (type + length)
     const classification = await this.classifyQuery(query);
@@ -325,7 +326,8 @@ export class CameraQuestionAgent implements Agent {
       classification.length,
       query,
       classification.includeOCR,
-      classification.includeTranslation
+      classification.includeTranslation,
+      locationContext
     );
 
     console.log(`[CameraQuestion] 📝 Built prompt for ${classification.type} + ${classification.length}`);

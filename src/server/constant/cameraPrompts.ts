@@ -45,6 +45,7 @@ Your task: Answer the user's SPECIFIC question about what you see.
 
 Guidelines:
 - Use first-person: "I see..." not "The image shows..."
+- Be SPECIFIC. If you can identify the exact name of a building, landmark, restaurant, church, business, product, or brand, say its name. A specific answer like "This is Notre-Dame Cathedral" is far better than a generic "I see a Gothic cathedral."
 - FOCUS ON THE USER'S QUESTION - only answer what they asked
 - If they ask about price, try to estimate or say you cannot determine it
 - If they ask about a specific object, identify THAT object, not everything in the scene
@@ -141,7 +142,8 @@ export function buildCameraPrompt(
   responseMode: ResponseMode,
   query: string,
   includeOCR: boolean = false,
-  includeTranslation: boolean = false
+  includeTranslation: boolean = false,
+  locationContext?: string
 ): string {
   let prompt = CAMERA_CATEGORY_PROMPTS[category];
 
@@ -161,6 +163,11 @@ export function buildCameraPrompt(
   // Add identification enhancement for general queries
   if (category === CameraQuestionCategory.GENERAL && !includeOCR && !includeTranslation) {
     prompt += IDENTIFICATION_ENHANCEMENT;
+  }
+
+  // Add location context if available
+  if (locationContext) {
+    prompt += `\n\nLOCATION CONTEXT: The user is currently ${locationContext}. Use this to identify specific places, buildings, landmarks, or businesses they may be looking at. Combine what you see in the image with the location to give a specific answer.`;
   }
 
   // Add the user's query

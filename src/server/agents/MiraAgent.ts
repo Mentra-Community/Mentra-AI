@@ -867,6 +867,13 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
   }
 
     /**
+   * Get the current location context
+   */
+  public getLocationContext() {
+    return this.locationContext;
+  }
+
+  /**
    * Updates the agent's location context including timezone information
    * Gracefully handles invalid or incomplete location data
    * Preserves existing known values when new values are "Unknown"
