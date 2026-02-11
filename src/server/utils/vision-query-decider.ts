@@ -8,7 +8,6 @@ import { GoogleGenAI } from '@google/genai';
 export enum VisionDecision {
   YES = 'yes',
   NO = 'no',
-  UNSURE = 'unsure',
 }
 
 const VISION_DECISION_PROMPT = `You are a query classifier for smart glasses with a camera.
@@ -26,6 +25,9 @@ DEFINITELY REQUIRES CAMERA (respond "YES"):
 - Asking to identify visible surroundings/landmarks using "this"/"that": "what building is this", "what store is that", "what restaurant is this" (NOT "what is restaurant X" which asks about a named place)
 - Asking for price, name, or info about "this" or "that" object: "what's the price of this", "tell me the plant", "the price of this"
 - ANY query containing "this" or "that" when asking about physical properties (price, name, type, brand, color, size, appearance) = YES
+- "what am I working on", "what am I doing" - user is wearing smart glasses, so they likely mean what's visible = YES
+- "where am I" - could want to identify visible surroundings = YES
+- When in doubt and the query COULD be about something physical in the user's environment = YES
 
 DEFINITELY DOES NOT REQUIRE CAMERA (respond "NO"):
 - Greetings and casual conversation: "hi", "hello", "hey", "what's up", "how are you", "good morning", "yo", "sup"
@@ -41,15 +43,8 @@ DEFINITELY DOES NOT REQUIRE CAMERA (respond "NO"):
 - Questions about NAMED/SPECIFIC entities: "what is restaurant X", "tell me about place Y", "where is store Z located" - these are asking about a known business/place BY NAME, not asking to identify something visible
 - Questions asking for info about a specific named business/place: "what is Starbucks", "where is Papito's", "what is restaurant Rapido" = NO (they're asking about something by name, not looking at it)
 
-AMBIGUOUS - COULD GO EITHER WAY (respond "UNSURE"):
-- "what am I working on" - could refer to visible task OR abstract question = UNSURE
-- "what am I working on right now" - needs camera to see what's in front of them = UNSURE
-- "where am I" - could want GPS location OR want to identify visible surroundings = UNSURE
-- "what's in front of me" - definitely needs camera = YES
-- When the query could reasonably be about something physical in the user's environment = UNSURE
-- ONLY use UNSURE when truly ambiguous - when in doubt and query mentions "this"/"that", prefer YES
-
-IMPORTANT: If query asks about price, name, type, brand, identification of "this" or "that" - respond YES, not UNSURE
+IMPORTANT: If query asks about price, name, type, brand, identification of "this" or "that" - respond YES
+IMPORTANT: When in doubt, prefer YES. The user is wearing smart glasses with a camera - if there's any reasonable chance they're asking about something in their environment, use the camera.
 
 CRITICAL - Detecting follow-up questions:
 - If conversation context is provided, check if the query references topics from previous messages
@@ -62,7 +57,7 @@ CRITICAL - Detecting follow-up questions:
 
 Query: "{query}"
 
-Respond with ONLY one word: "YES", "NO", or "UNSURE".`;
+Respond with ONLY one word: "YES" or "NO".`;
 
 // Simple type for conversation messages
 export interface ConversationMessage {
@@ -102,7 +97,7 @@ export class VisionQueryDecider {
 
   /**
    * Fast pre-check for obvious vision patterns before calling LLM
-   * Returns YES for clear vision queries, UNSURE for ambiguous, null to continue to LLM
+   * Returns YES for clear vision queries, NO for ambiguous, null to continue to LLM
    */
   private fastVisionCheck(query: string): VisionDecision | null {
     const queryLower = query.toLowerCase();
@@ -128,10 +123,10 @@ export class VisionQueryDecider {
     }
 
     // Ambiguous patterns - "what am I working on", "what am I doing"
-    // These COULD be asking about visible work OR abstract current task
+    // Could be about visible work or abstract task - default to YES (use camera)
     if (/what am i (working on|doing)\b/i.test(queryLower)) {
-      console.log(`🤖 VisionQueryDecider: "${query}" -> UNSURE (fast check: what am I working/doing)`);
-      return VisionDecision.UNSURE;
+      console.log(`🤖 VisionQueryDecider: "${query}" -> YES (fast check: what am I working/doing)`);
+      return VisionDecision.YES;
     }
 
     return null; // Continue to LLM check
@@ -139,7 +134,7 @@ export class VisionQueryDecider {
 
   /**
    * Determine if a query requires camera/vision
-   * Returns YES, NO, or UNSURE
+   * Returns YES or NO
    * @param query - The user's query
    * @param conversationHistory - Optional recent conversation for context
    */
@@ -170,8 +165,6 @@ export class VisionQueryDecider {
 
       if (result === 'YES' || result.startsWith('YES')) {
         return VisionDecision.YES;
-      } else if (result === 'UNSURE' || result.startsWith('UNSURE')) {
-        return VisionDecision.UNSURE;
       } else {
         return VisionDecision.NO;
       }
@@ -226,8 +219,8 @@ export class VisionQueryDecider {
             return VisionDecision.YES;
           }
         }
-        // Has demonstrative but no clear vision action - could be ambiguous
-        return VisionDecision.UNSURE;
+        // Has demonstrative but no clear vision action - default to YES (use camera when in doubt)
+        return VisionDecision.YES;
       }
     }
 

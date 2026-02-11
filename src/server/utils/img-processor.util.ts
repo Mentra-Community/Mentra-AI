@@ -23,7 +23,10 @@ if (!GEMENI_API_KEY) {
 export async function analyzeImage(
   imagePath: string,
   question: string,
-  model = "gemini-flash-lite-latest",
+  model = 
+  // "gemini-flash-lite-latest"
+  "gemini-3-flash-preview"
+  ,
   logger?: Logger
 ): Promise<string | null> {
   const log = logger || _logger.child({ service: "GeminiAPI" });
