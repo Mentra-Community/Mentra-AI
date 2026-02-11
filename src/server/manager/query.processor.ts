@@ -392,10 +392,9 @@ export class QueryProcessor {
         }
       } else {
         // Use MiraAgent for general queries (not a vision query)
-        // Clear cached photo since it won't be used
+        // Keep the photo so it can be streamed to the frontend
         if (!isVisionQuery && photo) {
-          this.photoManager.clearPhoto();
-          console.log(`⏱️  [+${agentStartTime - processQueryStartTime}ms] 📸 Vision decider: NO - cleared cached photo`);
+          console.log(`⏱️  [+${agentStartTime - processQueryStartTime}ms] 📸 Vision decider: NO - keeping photo for frontend display`);
         }
         console.log(`⏱️  [+${agentStartTime - processQueryStartTime}ms] 🤖 Invoking MiraAgent.handleContext...`);
         agentResponse = await this.miraAgent.handleContext(inputData);
@@ -539,7 +538,7 @@ export class QueryProcessor {
 
     console.log(`🎯 needsCamera flag: ${needsCamera}`);
 
-    // Update user message with photo if camera was needed
+    // Always update user message with photo if one was captured
     await this.updateMessageWithPhoto(needsCamera, query, photo);
 
     if (!finalAnswer) {
@@ -601,26 +600,27 @@ export class QueryProcessor {
   }
 
   /**
-   * Update user message with photo if needed
+   * Update user message with photo if available
+   * Always attaches the captured photo to the user's message so it streams in the frontend
    */
-  private async updateMessageWithPhoto(needsCamera: boolean, query: string, photo: PhotoData | null): Promise<void> {
+  private async updateMessageWithPhoto(_needsCamera: boolean, query: string, photo: PhotoData | null): Promise<void> {
     let finalPhoto = photo;
-    if (needsCamera && !finalPhoto) {
-      console.log(`📱 [WEBVIEW] 🔍 Camera needed but photo not available - checking cache after agent processing...`);
+    if (!finalPhoto) {
+      console.log(`📱 [WEBVIEW] 🔍 Photo not passed directly - checking cache after agent processing...`);
       const cachedPhoto = this.photoManager.getCachedPhoto();
       if (cachedPhoto) {
         finalPhoto = cachedPhoto;
         console.log(`📱 [WEBVIEW] ✅ Found photo in cache after agent processing`);
       } else {
-        console.log(`📱 [WEBVIEW] ⚠️ No photo in cache - agent may not have received it yet`);
+        console.log(`📱 [WEBVIEW] ⚠️ No photo in cache`);
       }
     }
 
-    if (this.chatManager && needsCamera && finalPhoto) {
+    if (this.chatManager && finalPhoto) {
       console.log(`\n${"=".repeat(70)}`);
       console.log(`📱 [WEBVIEW] Updating message with photo for user: ${this.userId}`);
       const photoBase64 = `data:${finalPhoto.mimeType};base64,${finalPhoto.buffer.toString('base64')}`;
-      console.log(`📱 [WEBVIEW] 📷 Including photo (${finalPhoto.mimeType}, ${finalPhoto.size} bytes) - camera was needed`);
+      console.log(`📱 [WEBVIEW] 📷 Including photo (${finalPhoto.mimeType}, ${finalPhoto.size} bytes) - always streaming photo to frontend`);
       console.log(`${"=".repeat(70)}\n`);
 
       // Try to update the existing message if we have its ID
@@ -636,8 +636,8 @@ export class QueryProcessor {
         console.warn(`📱 [WEBVIEW] ⚠️ No currentQueryMessageId available, creating new message`);
         this.chatManager.addUserMessage(this.userId, query, photoBase64);
       }
-    } else if (this.chatManager && needsCamera && !finalPhoto) {
-      console.log(`📱 [WEBVIEW] ⚠️ Camera was needed but no photo available even after checking cache`);
+    } else if (this.chatManager && !finalPhoto) {
+      console.log(`📱 [WEBVIEW] ℹ️ No photo available for this query`);
     } else if (!this.chatManager) {
       console.warn(`⚠️  [WEBVIEW] ChatManager not available - webview won't receive updates`);
     }
