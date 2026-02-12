@@ -660,7 +660,8 @@ export class MiraAgent implements Agent {
       'describe', 'elaborate', 'in detail', 'comprehensive', 'understand',
       'breakdown', 'walk me through', 'teach me', 'help me understand',
       'what are the implications', 'analyze', 'evaluation', 'pros and cons',
-      'advantages and disadvantages', 'tell me more', 'give me details'
+      'advantages and disadvantages', 'tell me more', 'give me details',
+      'solve', 'equation', 'calculate', 'compute', 'formula', 'math',
     ];
 
     // Keywords for standard responses (moderate complexity)
@@ -732,6 +733,75 @@ export class MiraAgent implements Agent {
   }
 
   /**
+   * Determines if a query is about something visual (what the user is looking at).
+   * Only visual queries should include the camera photo in the LLM message.
+   * Non-visual queries (greetings, general knowledge, etc.) get text-only.
+   */
+  private isVisualQuery(query: string): boolean {
+    const queryLower = query.toLowerCase();
+    const visualPatterns = [
+      'what am i looking at',
+      'what is this',
+      'what is that',
+      'what are these',
+      'what are those',
+      'identify this',
+      'identify that',
+      'what do you see',
+      'describe what',
+      'tell me about this',
+      'tell me about that',
+      'what\'s in front of me',
+      'can you see',
+      'look at this',
+      'look at that',
+      'read this',
+      'read that',
+      'what does this say',
+      'what does that say',
+      'what does it say',
+      'what color',
+      'what brand',
+      'how many',
+      'who is this',
+      'who is that',
+      'recognize',
+      'what\'s this',
+      'what\'s that',
+      'scan this',
+      'translate this',
+      'what language',
+      // Natural phrasings people use with smart glasses
+      'what do i see',
+      'what\'s written',
+      'what is written',
+      'what\'s on',
+      'what is on',
+      'show me',
+      'does it say',
+      'does this say',
+      'does that say',
+      'what text',
+      'read the',
+      'read my',
+      'what\'s in',
+      'what is in',
+      'looking at',
+      'in front of me',
+      'see this',
+      'see that',
+      'see here',
+      'back of my',
+      'front of my',
+      'screen say',
+      'phone say',
+      'sign say',
+      'label say',
+    ];
+    return visualPatterns.some(keyword => queryLower.includes(keyword));
+  }
+
+  /**
    * Detects if the current query is related to recent conversation history
    * Uses the LLM to determine if this is a follow-up question
    */
@@ -757,27 +827,16 @@ export class MiraAgent implements Agent {
     ];
 
     const queryLower = query.toLowerCase();
-    console.log('[MiraAgent] Checking vision keywords against query:', queryLower);
-    const isVisionQuery = visionKeywords.some(keyword => {
-      const matches = queryLower.includes(keyword);
-      if (matches) {
-        console.log(`[MiraAgent] ✅ Vision keyword matched: "${keyword}"`);
-      }
-      return matches;
-    });
+    const isVisionQuery = visionKeywords.some(keyword => queryLower.includes(keyword));
 
     if (isVisionQuery) {
-      console.log('[MiraAgent] ✅ Vision query detected - treating as independent query to get fresh photo');
       return false;
     }
 
     // Check if this is a "current state" query that needs fresh data from tools
     if (this.isCurrentStateQuery(query)) {
-      console.log('[MiraAgent] ✅ Current state query detected - treating as independent query to get fresh data');
       return false;
     }
-
-    console.log('[MiraAgent] ❌ No vision/current-state keywords detected, checking LLM for follow-up detection...');
 
     // Get the most recent conversation turn
     const recentTurn = this.conversationHistory[this.conversationHistory.length - 1];
@@ -1032,9 +1091,6 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
         type: "image_url",
         image_url: { url: `data:${photo.mimeType};base64,${photo.buffer.toString('base64')}` }
       });
-      console.log(`📸 [Image] Included photo in user message (${photo.mimeType})`);
-    } else {
-      console.log(`📸 [Image] No photo available — text-only message`);
     }
 
     const messages: BaseMessage[] = [
@@ -1114,7 +1170,7 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
       }
 
       if (turns === MAX_TOOL_TURNS - 3) {
-        messages.push(new SystemMessage("REMINDER: You have 2 turns left. Please provide your Final Answer: marker now."));
+        messages.push(new HumanMessage("REMINDER: You have 2 turns left. Please provide your Final Answer: marker now."));
       }
 
       turns++;
@@ -1248,7 +1304,12 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
 
       const hasDisplay = userContext.hasDisplay === true;
       const responseMode = this.classifyQueryComplexity(query, hasDisplay);
-      const result = await this.runTextBasedAgent(query, locationInfo, notificationsContext, localtimeContext, photo, responseMode, hasDisplay);
+
+      // Only include the photo for visual queries — prevents the LLM from
+      // describing what it sees when the user asks something unrelated (e.g. "my name is Arian")
+      const agentPhoto = this.isVisualQuery(query) ? photo : null;
+
+      const result = await this.runTextBasedAgent(query, locationInfo, notificationsContext, localtimeContext, agentPhoto, responseMode, hasDisplay);
       await this.detectAndStoreDisambiguationAI(result.answer, originalQuery);
       this.addToConversationHistory(originalQuery, result.answer, !!photo);
       return { answer: result.answer, needsCamera: false };

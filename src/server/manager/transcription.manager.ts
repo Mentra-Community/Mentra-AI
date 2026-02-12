@@ -158,31 +158,8 @@ export class TranscriptionManager {
     const hasWakeWord = this.wakeWordDetector.hasWakeWord(text);
 
     if (this.isProcessingQuery) {
-      if (!hasWakeWord) {
-        // Not a wake word — ignore ambient speech during processing
-        return;
-      }
-      // Wake word detected during processing — reset state so next transcription starts fresh.
-      // We return here (don't process THIS transcript) because it may contain stale text
-      // from the previous query's STT session. The next incoming transcription will have
-      // a clean wake word and start a proper new session.
-      console.log(`🔄 [${new Date().toISOString()}] Wake word detected during processing — resetting state for next query (gen ${this.queryGeneration} -> ${this.queryGeneration + 1})`);
-      this.queryGeneration++; // Invalidate any in-flight processQuery finally blocks
-      this.queryProcessor.aborted = true; // Tell in-flight query to skip audio/response delivery
-      this.isProcessingQuery = false;
-      this.isListeningToQuery = false;
-      this.isInFollowUpMode = false;
-      this.activeSpeakerId = undefined;
-      this.transcriptionStartTime = 0;
-      this.lastProcessedQueryText = '';
-      this.transcriptProcessor.clear();
-      this.queryProcessor.clearCurrentQueryMessageId();
-      this.photoManager.clearPhoto();
-      if (this.timeoutId) { clearTimeout(this.timeoutId); this.timeoutId = undefined; }
-      if (this.maxListeningTimeoutId) { clearTimeout(this.maxListeningTimeoutId); this.maxListeningTimeoutId = undefined; }
-      if (this.followUpTimeoutId) { clearTimeout(this.followUpTimeoutId); this.followUpTimeoutId = undefined; }
-      // Return — don't process this transcript. The next transcription with a wake word
-      // will be handled cleanly by the normal flow below.
+      // Ignore ALL transcriptions (including wake word) while a query is being processed.
+      // The user must wait for the current query to finish before starting a new one.
       return;
     }
 
@@ -374,7 +351,7 @@ export class TranscriptionManager {
     // Transcriptions arriving during audio playback must route to follow-up handling,
     // not wake word detection. Otherwise, ambient sound during the follow-up chime
     // can trigger false activations.
-    this.isInFollowUpMode = true;
+    this.isInFollowUpMode = false;
     this.isProcessingQuery = false;
     this.transcriptionStartTime = 0;
     this.transcriptProcessor.clear();
@@ -611,19 +588,8 @@ export class TranscriptionManager {
       this.maxListeningTimeoutId = undefined;
     }
 
-    let shouldEnterFollowUp = true; // Track if we should enter follow-up mode
-
-    // Store the raw text to prevent it from being re-processed in next follow-up
-    // This is needed because backend doesn't properly clear/filter transcripts
-    this.lastProcessedQueryText = rawText;
-
     try {
-      const result = await this.queryProcessor.processQuery(rawText, timerDuration, this.transcriptionStartTime, this.activeSpeakerId);
-      // If processQuery returns false, it means the query was cancelled or was an affirmative phrase
-      // and we should NOT enter follow-up mode
-      if (result === false) {
-        shouldEnterFollowUp = false;
-      }
+      await this.queryProcessor.processQuery(rawText, timerDuration, this.transcriptionStartTime, this.activeSpeakerId);
     } catch (error) {
       logger.error(error, `[Session ${this.sessionId}]: Error in processQuery:`);
     } finally {
@@ -649,18 +615,8 @@ export class TranscriptionManager {
         this.maxListeningTimeoutId = undefined;
       }
 
-      // Start follow-up listening mode ONLY if query was actually processed
-      // Skip follow-up for cancellations and affirmative phrases
-      // IMPORTANT: Force follow-up mode if there's a pending disambiguation (AI asked "which app?")
-      const hasPendingDisambiguation = this.queryProcessor.hasPendingDisambiguation();
-      const shouldStartFollowUp = shouldEnterFollowUp && (this.followUpEnabled || hasPendingDisambiguation);
-
-      if (shouldStartFollowUp) {
-        await this.startFollowUpListening();
-      } else {
-        // Release processing lock immediately if follow-up is disabled or query was cancelled
-        this.isProcessingQuery = false;
-      }
+      // Release processing lock — back to wake word mode
+      this.isProcessingQuery = false;
     }
   }
 

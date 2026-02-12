@@ -55,9 +55,7 @@ export class SearchToolForAgents extends StructuredTool {
     const startTime = Date.now();
     const { searchKeyword, location, numResults = 10, maxChars = 3000 } = input;
 
-    console.log("JINA IS WORKING")
     const logger = _logger.child({app: PACKAGE_NAME});
-    logger.debug("[SearchToolForAgents.ts] Running...")
 
     // Validate that we have an API key
     if (!JINA_API_KEY) {
@@ -76,7 +74,7 @@ export class SearchToolForAgents extends StructuredTool {
 
       const searchUrl = `https://s.jina.ai/?${searchParams.toString()}`;
 
-      console.log(`[SearchToolForAgents] Searching: ${searchUrl}`);
+      // console.log(`[SearchToolForAgents] Searching: ${searchUrl}`);
 
       // Build optimized headers for speed
       const headers: Record<string, string> = {
@@ -115,28 +113,7 @@ export class SearchToolForAgents extends StructuredTool {
 
       const elapsed = Date.now() - startTime;
 
-      // Performance profiling
-      console.log(`\n╔════════════════════════════════════════════════════════╗`);
-      console.log(`║         JINA SEARCH PERFORMANCE                      ║`);
-      console.log(`╚════════════════════════════════════════════════════════╝`);
-      console.log(`🔍 Query: "${searchKeyword}"`);
-      console.log(`⏱️  Time: ${elapsed}ms`);
-      console.log(`📊 Results: ${numResults} requested`);
-      console.log(`📝 Length: ${responseText.length} characters`);
-      console.log(`🚀 Speed: ${(responseText.length / elapsed * 1000).toFixed(0)} chars/second`);
-
-      if (elapsed < 1000) {
-        console.log(`✅ STATUS: EXCELLENT (< 1 second)`);
-      } else if (elapsed < 2000) {
-        console.log(`✅ STATUS: GOOD (< 2 seconds)`);
-      } else if (elapsed < 3000) {
-        console.log(`⚠️  STATUS: ACCEPTABLE (< 3 seconds)`);
-      } else {
-        console.log(`❌ STATUS: SLOW (> 3 seconds)`);
-      }
-      console.log(`${'─'.repeat(60)}\n`);
-
-      logger.debug(`[SearchToolForAgents] Search completed in ${elapsed}ms, ${responseText.length} chars`);
+      console.log(`🔍 Search: "${searchKeyword}" (${elapsed}ms)`);
 
       // Return the response from Jina (already LLM-friendly)
       return responseText;
