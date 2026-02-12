@@ -219,7 +219,7 @@ class MiraServer extends AppServer {
           session.audio.playAudio({ audioUrl: welcomeSoundUrl }).catch((err) => {
             logger.debug('Welcome audio failed:', err);
           });
-        }, 750);
+        }, 1250);
       }
     }
 

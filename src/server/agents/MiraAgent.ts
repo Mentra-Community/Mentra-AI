@@ -985,6 +985,7 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
     photo: PhotoData | null,
     responseMode: ResponseMode = ResponseMode.QUICK,
     hasDisplay: boolean = false,
+    previousPhotos: { photo: PhotoData; query: string; timestamp: number }[] = [],
   ): Promise<{ answer: string; needsCamera: boolean }> {
     const configSet = hasDisplay ? DISPLAY_RESPONSE_CONFIGS : CAMERA_RESPONSE_CONFIGS;
     const config = configSet[responseMode];
@@ -1016,7 +1017,26 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
     // console.log(`[DEBUG] 🎭 Personality type: ${this.personality}\n`);
     // console.log(`[DEBUG] 🎭 Response mode: ${responseMode} (${config.wordLimit} words)\n`);
 
-    // Build multimodal user message with image if available
+    // Build message history with previous photos for visual context
+    const messages: BaseMessage[] = [
+      new SystemMessage(systemPrompt),
+    ];
+
+    // Include previous photos as prior context (oldest first)
+    if (previousPhotos.length > 0) {
+      for (const prev of previousPhotos) {
+        const prevContent: any[] = [
+          { type: "text", text: `[Previous query: "${prev.query}"]` },
+          {
+            type: "image_url",
+            image_url: { url: `data:${prev.photo.mimeType};base64,${prev.photo.buffer.toString('base64')}` }
+          },
+        ];
+        messages.push(new HumanMessage({ content: prevContent }));
+      }
+    }
+
+    // Build current multimodal user message with image if available
     const humanMessageContent: any[] = [{ type: "text", text: query }];
     if (photo) {
       humanMessageContent.push({
@@ -1025,16 +1045,23 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
       });
     }
 
-    const messages: BaseMessage[] = [
-      new SystemMessage(systemPrompt),
-      new HumanMessage({ content: humanMessageContent }),
-    ];
+    messages.push(new HumanMessage({ content: humanMessageContent }));
+
+    // Race two identical LLM requests and use whichever responds first
+    const raceLLM = async (msgs: BaseMessage[]): Promise<AIMessage> => {
+      const msgsCopy = [...msgs];
+      const result = await Promise.race([
+        llm.invoke(msgsCopy),
+        llm.invoke(msgsCopy),
+      ]);
+      return result as AIMessage;
+    };
 
     let turns = 0;
     let output = "";
     while (turns < MAX_TOOL_TURNS) {
       // console.log(`\n[Turn ${turns + 1}/${MAX_TOOL_TURNS}] 🤖 Invoking LLM in ${responseMode.toUpperCase()} mode...`);
-      const result: AIMessage = await llm.invoke(messages);
+      const result: AIMessage = await raceLLM(messages);
       messages.push(result);
 
       output = result.content.toString();
@@ -1162,6 +1189,7 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
       const originalQuery = userContext.originalQuery || query;
       let photo = userContext.photo as PhotoData | null;
       const getPhotoCallback = userContext.getPhotoCallback as (() => Promise<PhotoData | null>) | undefined;
+      const previousPhotos = (userContext.previousPhotos || []) as { photo: PhotoData; query: string; timestamp: number }[];
 
       let turns = 0;
 
@@ -1239,7 +1267,7 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
 
       // Always include the photo — the system prompt already instructs the model to
       // only analyze the image when the query is visual and ignore it otherwise.
-      const result = await this.runTextBasedAgent(query, locationInfo, notificationsContext, localtimeContext, photo, responseMode, hasDisplay);
+      const result = await this.runTextBasedAgent(query, locationInfo, notificationsContext, localtimeContext, photo, responseMode, hasDisplay, previousPhotos);
       await this.detectAndStoreDisambiguationAI(result.answer, originalQuery);
       this.addToConversationHistory(originalQuery, result.answer, !!photo);
       return { answer: result.answer, needsCamera: false };

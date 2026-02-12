@@ -16,6 +16,7 @@ interface PhotoCache {
 export class PhotoManager {
   private activePhotos: Map<string, PhotoCache> = new Map();
   private isRequestingPhoto: boolean = false;
+  private currentRequestId: number = 0;
   private session: AppSession;
   private sessionId: string;
 
@@ -29,21 +30,23 @@ export class PhotoManager {
    * Always takes a new photo - no caching of old photos
    */
   requestPhoto(): void {
-    // Always clear any existing photo and request a fresh one
-    if (this.isRequestingPhoto) {
-      return;
-    }
-
     if (this.session.capabilities?.hasCamera) {
       // Clear any existing photo first - we always want a fresh one
       this.activePhotos.delete(this.sessionId);
 
       this.isRequestingPhoto = true;
       const photoRequestTime = Date.now();
+      const requestId = ++this.currentRequestId;
 
       const getPhotoPromise = this.session.camera.requestPhoto({ size: "medium" });
 
       getPhotoPromise.then(photoData => {
+        // Only accept this response if it's still the current request
+        // (a newer requestPhoto() call hasn't superseded this one)
+        if (requestId !== this.currentRequestId) {
+          logger.debug(`[Session ${this.sessionId}]: Ignoring stale photo response (request ${requestId}, current ${this.currentRequestId})`);
+          return;
+        }
 
         this.activePhotos.set(this.sessionId, {
           promise: getPhotoPromise,
@@ -52,6 +55,7 @@ export class PhotoManager {
         });
         this.isRequestingPhoto = false;
       }, error => {
+        if (requestId !== this.currentRequestId) return;
         logger.error(error, `[Session ${this.sessionId}]: Error getting photo:`);
         this.activePhotos.delete(this.sessionId);
         this.isRequestingPhoto = false;

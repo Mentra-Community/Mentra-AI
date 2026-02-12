@@ -52,6 +52,10 @@ export class QueryProcessor {
   // Checked before speaking so an interrupted query doesn't play audio over the new one.
   public aborted: boolean = false;
 
+  // Sliding window of the last 2 photos from previous queries (not including the current one)
+  private static readonly MAX_PREVIOUS_PHOTOS = 2;
+  private previousPhotos: { photo: PhotoData; query: string; timestamp: number }[] = [];
+
   constructor(config: QueryProcessorConfig) {
     this.session = config.session;
     this.sessionId = config.sessionId;
@@ -191,7 +195,7 @@ export class QueryProcessor {
       };
 
       const hasDisplay = this.session.capabilities?.hasDisplay;
-      const inputData = { query, originalQuery: query, photo, getPhotoCallback, hasDisplay };
+      const inputData = { query, originalQuery: query, photo, getPhotoCallback, hasDisplay, previousPhotos: this.previousPhotos };
 
       // Single agent call with 30-second timeout
       const QUERY_TIMEOUT_MS = 30000;
@@ -221,6 +225,14 @@ export class QueryProcessor {
 
       // Handle response
       await this.handleAgentResponse(agentResponse, query, photo);
+
+      // Save current photo to history for future queries
+      if (photo) {
+        this.previousPhotos.push({ photo, query, timestamp: Date.now() });
+        if (this.previousPhotos.length > QueryProcessor.MAX_PREVIOUS_PHOTOS) {
+          this.previousPhotos.shift();
+        }
+      }
 
       const totalProcessTime = Date.now() - processQueryStartTime;
       console.log(`🏁 processQuery COMPLETE (${(totalProcessTime / 1000).toFixed(2)}s)`);
