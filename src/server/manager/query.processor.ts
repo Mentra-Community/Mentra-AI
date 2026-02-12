@@ -92,9 +92,13 @@ export class QueryProcessor {
 
     console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📊 Transcription duration: ${durationSeconds}s`);
 
+    // Play processing sounds IMMEDIATELY so user gets instant feedback
+    const stopProcessingSounds = await this.audioManager.playProcessingSounds();
+
     // Fetch transcript from backend
     const transcriptionResponse = await this.fetchTranscript(durationSeconds, processQueryStartTime, transcriptionStartTime);
     if (!transcriptionResponse) {
+      stopProcessingSounds();
       return false;
     }
 
@@ -139,6 +143,7 @@ export class QueryProcessor {
 
     if (isAffirmative) {
       console.log(`✅ [${new Date().toISOString()}] Initial query is affirmative phrase - not processing`);
+      stopProcessingSounds();
       // Play a simple acknowledgment instead of entering follow-up mode
       await this.audioManager.showOrSpeakText("You're welcome!");
       return false; // Don't enter follow-up mode for affirmative phrases
@@ -149,12 +154,14 @@ export class QueryProcessor {
     const cancellationCheck = await cancellationDecider.checkIfWantsToCancelAsync(query);
     if (cancellationCheck === CancellationDecision.CANCEL) {
       logger.debug("Cancellation detected in processQuery (AI-powered)");
+      stopProcessingSounds();
       await this.audioManager.playCancellation();
       this.session.layouts.showTextWall("Cancelled", { durationMs: 2000 });
       return false; // Don't enter follow-up mode for cancellation phrases
     }
 
     if (query.trim().length === 0) {
+      stopProcessingSounds();
       // Play cancellation sound as feedback for empty query
       await this.audioManager.playCancellation();
       this.session.layouts.showTextWall(
@@ -163,9 +170,6 @@ export class QueryProcessor {
       );
       return false;
     }
-
-    // Play processing sounds
-    const stopProcessingSounds = await this.audioManager.playProcessingSounds();
 
     try {
       console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📝 Query extracted: "${query}"`);

@@ -277,7 +277,7 @@ export class TranscriptionManager {
         timerDuration = 1500;
       }
     } else {
-      timerDuration = 2000;
+      timerDuration = 1500;
     }
 
     // Clear any existing timeout
@@ -387,9 +387,9 @@ export class TranscriptionManager {
     // Set timer to process the follow-up query
     let timerDuration: number;
     if (transcriptionData.isFinal) {
-      timerDuration = 1500; // Shorter timeout for follow-ups
+      timerDuration = 1500;
     } else {
-      timerDuration = 2000;
+      timerDuration = 1500;
     }
 
     // Clear any existing timeout
