@@ -179,6 +179,12 @@ export class QueryProcessor {
         this.chatManager.setProcessing(this.userId, true);
       }
 
+      // Stream photo to frontend immediately so it shows up while the LLM is thinking
+      if (this.chatManager && photo && this.currentQueryMessageId) {
+        const photoBase64 = `data:${photo.mimeType};base64,${photo.buffer.toString('base64')}`;
+        this.chatManager.updateUserMessage(this.userId, this.currentQueryMessageId, query, photoBase64);
+      }
+
       // Create callback for agent to wait for photo if needed (fallback)
       const getPhotoCallback = async (): Promise<PhotoData | null> => {
         return await this.photoManager.getPhoto(true);
@@ -187,8 +193,8 @@ export class QueryProcessor {
       const hasDisplay = this.session.capabilities?.hasDisplay;
       const inputData = { query, originalQuery: query, photo, getPhotoCallback, hasDisplay };
 
-      // Single agent call with 16-second timeout
-      const QUERY_TIMEOUT_MS = 16000;
+      // Single agent call with 30-second timeout
+      const QUERY_TIMEOUT_MS = 30000;
       const timeoutPromise = new Promise<null>((resolve) =>
         setTimeout(() => resolve(null), QUERY_TIMEOUT_MS)
       );
@@ -204,7 +210,12 @@ export class QueryProcessor {
       // If timed out, tell the user
       if (agentResponse === null) {
         console.log(`⏰ processQuery TIMED OUT after ${QUERY_TIMEOUT_MS / 1000}s`);
-        await this.audioManager.showOrSpeakText("Hmm, something went wrong.");
+        const timeoutMsg = "Hmm, something went wrong.";
+        await this.audioManager.showOrSpeakText(timeoutMsg);
+        if (this.chatManager) {
+          this.chatManager.setProcessing(this.userId, false);
+          this.chatManager.addAssistantMessage(this.userId, timeoutMsg);
+        }
         return false;
       }
 
@@ -219,7 +230,12 @@ export class QueryProcessor {
     } catch (error) {
       // Error logged by logger below
       logger.error(error, `[Session ${this.sessionId}]: Error processing query:`);
-      await this.audioManager.showOrSpeakText("Sorry, there was an error processing your request.");
+      const errorMsg = "Sorry, there was an error processing your request.";
+      await this.audioManager.showOrSpeakText(errorMsg);
+      if (this.chatManager) {
+        this.chatManager.setProcessing(this.userId, false);
+        this.chatManager.addAssistantMessage(this.userId, errorMsg);
+      }
       stopProcessingSounds();
       return false;
     }
