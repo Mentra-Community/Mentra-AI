@@ -732,74 +732,6 @@ export class MiraAgent implements Agent {
     return currentStatePatterns.some(pattern => pattern.test(queryLower));
   }
 
-  /**
-   * Determines if a query is about something visual (what the user is looking at).
-   * Only visual queries should include the camera photo in the LLM message.
-   * Non-visual queries (greetings, general knowledge, etc.) get text-only.
-   */
-  private isVisualQuery(query: string): boolean {
-    const queryLower = query.toLowerCase();
-    const visualPatterns = [
-      'what am i looking at',
-      'what is this',
-      'what is that',
-      'what are these',
-      'what are those',
-      'identify this',
-      'identify that',
-      'what do you see',
-      'describe what',
-      'tell me about this',
-      'tell me about that',
-      'what\'s in front of me',
-      'can you see',
-      'look at this',
-      'look at that',
-      'read this',
-      'read that',
-      'what does this say',
-      'what does that say',
-      'what does it say',
-      'what color',
-      'what brand',
-      'how many',
-      'who is this',
-      'who is that',
-      'recognize',
-      'what\'s this',
-      'what\'s that',
-      'scan this',
-      'translate this',
-      'what language',
-      // Natural phrasings people use with smart glasses
-      'what do i see',
-      'what\'s written',
-      'what is written',
-      'what\'s on',
-      'what is on',
-      'show me',
-      'does it say',
-      'does this say',
-      'does that say',
-      'what text',
-      'read the',
-      'read my',
-      'what\'s in',
-      'what is in',
-      'looking at',
-      'in front of me',
-      'see this',
-      'see that',
-      'see here',
-      'back of my',
-      'front of my',
-      'screen say',
-      'phone say',
-      'sign say',
-      'label say',
-    ];
-    return visualPatterns.some(keyword => queryLower.includes(keyword));
-  }
 
   /**
    * Detects if the current query is related to recent conversation history
@@ -1305,11 +1237,9 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
       const hasDisplay = userContext.hasDisplay === true;
       const responseMode = this.classifyQueryComplexity(query, hasDisplay);
 
-      // Only include the photo for visual queries — prevents the LLM from
-      // describing what it sees when the user asks something unrelated (e.g. "my name is Arian")
-      const agentPhoto = this.isVisualQuery(query) ? photo : null;
-
-      const result = await this.runTextBasedAgent(query, locationInfo, notificationsContext, localtimeContext, agentPhoto, responseMode, hasDisplay);
+      // Always include the photo — the system prompt already instructs the model to
+      // only analyze the image when the query is visual and ignore it otherwise.
+      const result = await this.runTextBasedAgent(query, locationInfo, notificationsContext, localtimeContext, photo, responseMode, hasDisplay);
       await this.detectAndStoreDisambiguationAI(result.answer, originalQuery);
       this.addToConversationHistory(originalQuery, result.answer, !!photo);
       return { answer: result.answer, needsCamera: false };
