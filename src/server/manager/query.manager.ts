@@ -187,16 +187,24 @@ export class QueryProcessor {
       const hasDisplay = this.session.capabilities?.hasDisplay;
       const inputData = { query, originalQuery: query, photo, getPhotoCallback, hasDisplay };
 
-      // Single agent call — MiraAgent handles everything (vision + tools + text)
-      const agentResponse = await this.miraAgent.handleContext(inputData);
+      // Single agent call with 16-second timeout
+      const QUERY_TIMEOUT_MS = 16000;
+      const timeoutPromise = new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), QUERY_TIMEOUT_MS)
+      );
+
+      const agentResponse = await Promise.race([
+        this.miraAgent.handleContext(inputData),
+        timeoutPromise,
+      ]);
 
       // Stop processing sounds
       stopProcessingSounds();
 
-      // If this query was aborted by a wake word interrupt, skip response delivery
-      if (this.aborted) {
-        // Play the start-listening sound so user gets feedback that interrupt worked
-        this.audioManager.playStartListening().catch(() => {});
+      // If timed out, tell the user
+      if (agentResponse === null) {
+        console.log(`⏰ processQuery TIMED OUT after ${QUERY_TIMEOUT_MS / 1000}s`);
+        await this.audioManager.showOrSpeakText("Hmm, something went wrong.");
         return false;
       }
 
