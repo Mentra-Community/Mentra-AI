@@ -235,10 +235,10 @@ export class CameraQuestionAgent implements Agent {
 
     const startTime = Date.now();
 
-    // Select model based on response mode (faster model for quick responses)
+    // Select model based on response mode (faster model for quick responses, stronger for detailed)
     const model = responseMode === ResponseMode.QUICK
       ? "gemini-flash-lite-latest"
-      : "gemini-flash-lite-latest"; // Can use different models for detailed responses
+      : "gemini-3-flash-preview";
 
     console.log(`[CameraQuestion] ⏳ Analyzing image with ${responseMode} mode...`);
 

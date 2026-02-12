@@ -1384,7 +1384,7 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
           fs.writeFileSync(tempImagePath, photo.buffer);
 
           // Run image analysis
-          const imageAnalysisResult = await analyzeImage(tempImagePath, query, "gemini-flash-lite-latest", this.logger);
+          const imageAnalysisResult = await analyzeImage(tempImagePath, query, "gemini-3-flash-preview", this.logger);
 
           console.log(`⏱️  [+${Date.now() - startTime}ms] ✅ Image analysis complete (took ${Date.now() - imageAnalysisStart}ms)`);
           console.log(`🤖 Image answer:`, imageAnalysisResult);
