@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Sparkles, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Lottie from 'lottie-react';
+import Markdown from 'react-markdown';
 import MentraLogoAnimation from '../../public/figma-parth-assets/anim/Mentralogo2.json';
 import MiraBackground from '../../public/figma-parth-assets/anim/Mira-Background.json';
 import { MiraBackgroundAnimation } from '../components/MiraBackgroundAnimation';
@@ -549,7 +550,36 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
                             ? 'bg-[var(--primary-foreground)] font-medium text-[var(--secondary-foreground:)]'
                             : 'bg-transparent pl-0 font-medium *:text-[var(--secondary-foreground:)]'
                         }`} style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
-                          {message.content}
+                          {isOwnMessage ? (
+                            message.content
+                          ) : (
+                            <Markdown
+                              components={{
+                                p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                                strong: ({ children }) => <strong className="font-bold">{children}</strong>,
+                                em: ({ children }) => <em className="italic">{children}</em>,
+                                ul: ({ children }) => <ul className="list-disc pl-4 mb-2">{children}</ul>,
+                                ol: ({ children }) => <ol className="list-decimal pl-4 mb-2">{children}</ol>,
+                                li: ({ children }) => <li className="mb-1">{children}</li>,
+                                code: ({ children, className }) => {
+                                  const isBlock = className?.includes('language-');
+                                  return isBlock ? (
+                                    <pre className="bg-[var(--primary-foreground)] rounded-lg p-3 my-2 overflow-x-auto">
+                                      <code className="text-[14px] font-mono">{children}</code>
+                                    </pre>
+                                  ) : (
+                                    <code className="bg-[var(--primary-foreground)] rounded px-1.5 py-0.5 text-[14px] font-mono">{children}</code>
+                                  );
+                                },
+                                h1: ({ children }) => <h1 className="text-xl font-bold mb-2">{children}</h1>,
+                                h2: ({ children }) => <h2 className="text-lg font-bold mb-2">{children}</h2>,
+                                h3: ({ children }) => <h3 className="text-base font-bold mb-1">{children}</h3>,
+                                blockquote: ({ children }) => <blockquote className="border-l-2 border-gray-400 pl-3 italic my-2">{children}</blockquote>,
+                              }}
+                            >
+                              {message.content}
+                            </Markdown>
+                          )}
                         </div>
                         <div className={`text-[12px] ml-[15px] mt-1.5 ${isOwnMessage ? 'text-right' : 'text-left'} w-full text-gray-400`}>
                           {new Date(message.timestamp).toLocaleTimeString()}

@@ -1392,6 +1392,43 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
           // Clean up temp file
           fs.unlinkSync(tempImagePath);
 
+          // Check if the query needs research beyond what's visible (e.g. "tell me about this company")
+          // If so, feed the image description back into the text agent so it can use Search
+          const queryLower = query.toLowerCase();
+          const needsResearch = imageAnalysisResult && (
+            queryLower.includes('tell me about') ||
+            queryLower.includes('what does') ||
+            queryLower.includes('what do they') ||
+            queryLower.includes('who is') ||
+            queryLower.includes('who are') ||
+            queryLower.includes('what is this company') ||
+            queryLower.includes('what is this brand') ||
+            queryLower.includes('what is this business') ||
+            queryLower.includes('look up') ||
+            queryLower.includes('search for') ||
+            queryLower.includes('find out') ||
+            queryLower.includes('more info') ||
+            queryLower.includes('more about') ||
+            queryLower.includes('learn about') ||
+            queryLower.includes('know about')
+          );
+
+          if (needsResearch) {
+            console.log(`⏱️  [+${Date.now() - startTime}ms] 🔍 Query needs research beyond image - re-running with image context...`);
+            const enrichedQuery = `The user is looking at something and asked: "${query}". The camera sees: ${imageAnalysisResult}. Now use your Search tool to find more information and give the user a complete, informative answer about what they're looking at.`;
+            const researchResult = await this.runTextBasedAgent(enrichedQuery, locationInfo, notificationsContext, localtimeContext, false, responseMode, hasDisplay, useMinimalTools);
+
+            const totalDuration = Date.now() - startTime;
+            console.log(`\n${"=".repeat(60)}`);
+            console.log(`⏱️  [+${totalDuration}ms] 🔍📸 RETURNING RESEARCH + IMAGE RESPONSE`);
+            console.log(`⏱️  Total processing time: ${(totalDuration / 1000).toFixed(2)}s`);
+            console.log(`${"=".repeat(60)}\n`);
+
+            const finalResponse = researchResult.answer;
+            this.addToConversationHistory(originalQuery, finalResponse);
+            return { answer: finalResponse, needsCamera: true };
+          }
+
           const totalDuration = Date.now() - startTime;
           console.log(`\n${"=".repeat(60)}`);
           console.log(`⏱️  [+${totalDuration}ms] 📸 RETURNING IMAGE-BASED RESPONSE`);

@@ -115,19 +115,19 @@ export interface ResponseConfig {
  */
 export const CAMERA_RESPONSE_CONFIGS: Record<ResponseMode, ResponseConfig> = {
   [ResponseMode.QUICK]: {
-    wordLimit: 20,
+    wordLimit: 30,
     maxTokens: 1000,
-    instructions: '🚨 CRITICAL WORD LIMIT: MAXIMUM 30 WORDS. This is NON-NEGOTIABLE. Count your words before responding. If your answer exceeds 30 words, it will be REJECTED. Be concise - every word must earn its place.'
+    instructions: '🚨 CRITICAL WORD LIMIT: MAXIMUM 30 WORDS. This is NON-NEGOTIABLE. Count your words before responding. If your answer exceeds 40 words, it will be REJECTED. Be concise - every word must earn its place.'
   },
   [ResponseMode.STANDARD]: {
-    wordLimit: 75,
+    wordLimit: 100,
     maxTokens: 1200,
-    instructions: '🚨 CRITICAL WORD LIMIT: MAXIMUM 75 WORDS. This is NON-NEGOTIABLE. Count your words before responding. If your answer exceeds 75 words, it will be REJECTED. Stay within 50-75 words.'
+    instructions: '🚨 CRITICAL WORD LIMIT: MAXIMUM 100 WORDS. This is NON-NEGOTIABLE. Count your words before responding. If your answer exceeds 100 words, it will be REJECTED. Stay within 80-100 words.'
   },
   [ResponseMode.DETAILED]: {
-    wordLimit: 200,
-    maxTokens: 1400,
-    instructions: '🚨 CRITICAL WORD LIMIT: MAXIMUM 200 WORDS. This is NON-NEGOTIABLE. Count your words before responding. If your answer exceeds 200 words, it will be REJECTED. Stay within 150-200 words.'
+    wordLimit: 150,
+    maxTokens: 1600,
+    instructions: '🚨 CRITICAL WORD LIMIT: MAXIMUM 170 WORDS. This is NON-NEGOTIABLE. Count your words before responding. If your answer exceeds 170 words, it will be REJECTED. Stay within 120-170 words.'
   }
 };
 

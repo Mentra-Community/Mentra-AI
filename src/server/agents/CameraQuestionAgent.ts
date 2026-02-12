@@ -235,15 +235,16 @@ export class CameraQuestionAgent implements Agent {
 
     const startTime = Date.now();
 
-    // Select model based on response mode (faster model for quick responses, stronger for detailed)
-    const model = responseMode === ResponseMode.QUICK
-      ? "gemini-flash-lite-latest"
-      : "gemini-3-flash-preview";
+    // Use gemini-3-flash with thinking disabled for speed
+    const model = "gemini-3-flash-preview";
 
     console.log(`[CameraQuestion] ⏳ Analyzing image with ${responseMode} mode...`);
 
     try {
       const imageData = fs.readFileSync(imagePath).toString("base64");
+
+      // Set maxOutputTokens based on response mode
+      const maxTokens = responseMode === ResponseMode.QUICK ? 80 : responseMode === ResponseMode.STANDARD ? 200 : 300;
 
       const response = await this.ai.models.generateContent({
         model,
@@ -261,6 +262,13 @@ export class CameraQuestionAgent implements Agent {
             ],
           },
         ],
+        config: {
+          maxOutputTokens: maxTokens,
+          temperature: 0.3,
+          thinkingConfig: {
+            thinkingBudget: 0,
+          },
+        },
       });
 
       const endTime = Date.now();

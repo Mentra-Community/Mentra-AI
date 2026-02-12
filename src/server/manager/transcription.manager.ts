@@ -20,7 +20,7 @@ const logger = _logger.child({ service: 'TranscriptionManager' });
  * Set to true to see ALL transcriptions (including ambient) in terminal
  * Set to false to only see relevant transcriptions (wake word, follow-up, etc.)
  */
-const DEBUG_LOG_ALL_TRANSCRIPTIONS = true;
+const DEBUG_LOG_ALL_TRANSCRIPTIONS = false;
 
 /**
  * Manages the transcription state for active sessions

@@ -23,9 +23,7 @@ if (!GEMENI_API_KEY) {
 export async function analyzeImage(
   imagePath: string,
   question: string,
-  model = 
-  // "gemini-flash-lite-latest"
-  "gemini-3-flash-preview"
+  model = "gemini-3-flash-preview"
   ,
   logger?: Logger
 ): Promise<string | null> {
@@ -45,7 +43,7 @@ CRITICAL - Camera Perspective: The camera is mounted on the user's face pointing
 Guidelines:
 - Say "I see..." not "In this image, I see..."
 - Be conversational and direct
-- Answer in 75 words or fewer
+- Answer in 120 words or fewer
 - Be SPECIFIC: identify exact names of apps, products, brands, buildings, landmarks, etc. A specific answer like "That's the Spotify app, it's a music streaming service" is far better than "I see an app on a phone screen"
 - FOCUS ON THE USER'S QUESTION - answer what they actually asked
 - If asked "what is this and what does it do?", identify it AND explain its purpose
@@ -73,6 +71,13 @@ User's Question: "${question}"
         ],
       },
     ],
+    config: {
+      maxOutputTokens: 200,
+      temperature: 0.3,
+      thinkingConfig: {
+        thinkingBudget: 0,
+      },
+    },
   });
 
   const promptEndTime = Date.now();

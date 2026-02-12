@@ -66,7 +66,7 @@ export const RESPONSE_LENGTH_INSTRUCTIONS: Record<ResponseMode, string> = {
   [ResponseMode.QUICK]: `
 
 CRITICAL RESPONSE RULES:
-- MAXIMUM 20 WORDS. Count your words. Do not exceed 20 words.
+- MAXIMUM 30 WORDS. Count your words. Do not exceed 30 words.
 - NO markdown formatting (no **, no *, no #, no bullet points, no numbered lists)
 - Plain text only - this will be spoken aloud
 - One or two sentences maximum
@@ -75,16 +75,16 @@ CRITICAL RESPONSE RULES:
   [ResponseMode.STANDARD]: `
 
 CRITICAL RESPONSE RULES:
-- MAXIMUM 75 WORDS. Count your words. Do not exceed 75 words.
+- MAXIMUM 100 WORDS. Count your words. Do not exceed 100 words.
 - NO markdown formatting (no **, no *, no #, no bullet points, no numbered lists)
 - Plain text only - this will be spoken aloud
 - Be concise but informative
-- 2-3 sentences maximum`,
+- 3-5 sentences, enough to explain what something is AND what it does`,
 
   [ResponseMode.DETAILED]: `
 
 CRITICAL RESPONSE RULES:
-- MAXIMUM 100 WORDS. Count your words. Do not exceed 100 words.
+- MAXIMUM 150 WORDS. Count your words. Do not exceed 150 words.
 - NO markdown formatting (no **, no *, no #, no bullet points, no numbered lists)
 - Plain text only - this will be spoken aloud
 - Provide thorough explanation in flowing sentences

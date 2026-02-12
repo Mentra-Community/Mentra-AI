@@ -66,6 +66,7 @@
     "pinyin-pro": "^3.26.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "react-markdown": "^10.1.0",
     "serpapi": "^2.2.1",
     "uuid": "^11.1.0",
     "ws": "^8.18.1"
