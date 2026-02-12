@@ -588,6 +588,10 @@ export class TranscriptionManager {
 
     this.isProcessingQuery = true;
 
+    // Store the raw text so the stale-transcript guard (lines 170-176) can detect
+    // echoed transcripts that arrive after this query finishes.
+    this.lastProcessedQueryText = rawText;
+
     // Capture the generation at entry — if it changes (due to interrupt), our finally block
     // must NOT reset state because a newer session owns it now.
     const myGeneration = this.queryGeneration;

@@ -41,7 +41,7 @@ export class PhotoManager {
       this.isRequestingPhoto = true;
       const photoRequestTime = Date.now();
 
-      const getPhotoPromise = this.session.camera.requestPhoto({ size: "small" });
+      const getPhotoPromise = this.session.camera.requestPhoto({ size: "medium" });
 
       getPhotoPromise.then(photoData => {
 
