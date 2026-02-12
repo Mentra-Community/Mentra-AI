@@ -163,6 +163,18 @@ export class TranscriptionManager {
       return;
     }
 
+    // Ignore stale transcriptions that echo the query we just finished processing.
+    // The STT session keeps emitting text from the same utterance even after processQuery
+    // completes and resets isProcessingQuery. Without this check, the stale transcript
+    // (which still contains the wake word) would be treated as a brand-new query.
+    if (!this.isListeningToQuery && this.lastProcessedQueryText && hasWakeWord) {
+      const queryWithoutWakeWord = this.wakeWordDetector.removeWakeWord(text).trim();
+      const lastQueryWithoutWakeWord = this.wakeWordDetector.removeWakeWord(this.lastProcessedQueryText).trim();
+      if (queryWithoutWakeWord.length > 0 && lastQueryWithoutWakeWord.includes(queryWithoutWakeWord)) {
+        return;
+      }
+    }
+
     // Handle follow-up mode: no wake word required, just process the transcription
     if (this.isInFollowUpMode) {
       // Per-transcription follow-up logs commented out to reduce noise
@@ -202,6 +214,9 @@ export class TranscriptionManager {
     }
 
     if (!this.isListeningToQuery) {
+      // New query starting — clear stale query text so future queries aren't blocked
+      this.lastProcessedQueryText = '';
+
       // Request a fresh photo ONLY when we first detect the wake word (start of query)
       // This prevents taking multiple photos during the same query
       this.photoManager.requestPhoto();

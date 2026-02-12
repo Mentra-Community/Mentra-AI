@@ -13,8 +13,8 @@ export type PersonalityType = 'default';
 
 /** Word limits per response mode (camera/audio-only glasses) */
 export const WORD_LIMITS = {
-  quick: 12,
-  standard: 40,
+  quick: 17,
+  standard: 50,
   detailed: 100,
 } as const;
 
