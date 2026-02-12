@@ -46,7 +46,7 @@
     "@googlemaps/google-maps-services-js": "^3.4.2",
     "@langchain/anthropic": "^0.3.16",
     "@langchain/community": "^0.3.39",
-    "@langchain/core": "^0.3.55",
+    "@langchain/core": "0.3.57",
     "@langchain/google-vertexai": "^0.2.3",
     "@langchain/openai": "^0.5.4",
     "@mentra/react": "^2.0.2",

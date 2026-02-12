@@ -51,6 +51,8 @@ DOES NOT NEED MEMORY RECALL (respond "CONTINUE"):
 - ACTION REQUESTS that build on previous topics: "make it longer", "give me more", "do it again but with X", "let's make it 100", "now do X" = CONTINUE (these are NEW requests, not asking to recall info)
 - Follow-up requests to expand/modify: "can you add more?", "make it bigger", "try another one", "give me 100 digits" = CONTINUE
 - CURRENT STATE queries that need FRESH/LIVE data: "what apps am I running", "which apps are active", "what's running right now", "list my running apps" = CONTINUE (even if we discussed apps before, they want CURRENT state, not memory)
+- NEW QUESTIONS that reference a previous topic: "regarding the previous drink, what's the calorie?", "how much does that cost?", "what are the ingredients of that?" = CONTINUE (they reference something discussed before but are asking a NEW question that needs search/tools, not just recall)
+- Questions asking for NEW information about something previously discussed: "what's the nutrition of that?", "where can I buy the X we talked about?", "how old is the person we discussed?" = CONTINUE
 
 IMPORTANT CONTEXT CLUES:
 - "previously", "earlier", "before" + conversation verb (asked, said, mentioned, discussed) = RECALL

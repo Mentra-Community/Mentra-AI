@@ -9,7 +9,7 @@
         "@googlemaps/google-maps-services-js": "^3.4.2",
         "@langchain/anthropic": "^0.3.16",
         "@langchain/community": "^0.3.39",
-        "@langchain/core": "^0.3.55",
+        "@langchain/core": "0.3.57",
         "@langchain/google-vertexai": "^0.2.3",
         "@langchain/openai": "^0.5.4",
         "@mentra/react": "^2.0.2",
@@ -153,6 +153,8 @@
 
     "@google/genai": ["@google/genai@1.22.0", "", { "dependencies": { "google-auth-library": "^9.14.2", "ws": "^8.18.0" }, "peerDependencies": { "@modelcontextprotocol/sdk": "^1.11.4" }, "optionalPeers": ["@modelcontextprotocol/sdk"] }, "sha512-siETS3zTm3EGpTT4+BFc1z20xXBYfueD3gCYfxkOjuAKRk8lt8TJevDHi3zepn1oSI6NhG/LZvy0i+Q3qheObg=="],
 
+    "@google/generative-ai": ["@google/generative-ai@0.24.1", "", {}, "sha512-MqO+MLfM6kjxcKoy0p1wRzG3b4ZZXtPI+z2IE26UogS2Cm/XHO+7gGRBh6gcJsOiIVoH93UwKvW4HdgiOZCy9Q=="],
+
     "@googlemaps/google-maps-services-js": ["@googlemaps/google-maps-services-js@3.4.2", "", { "dependencies": { "@googlemaps/url-signature": "^1.0.4", "agentkeepalive": "^4.1.0", "axios": "^1.5.1", "query-string": "<8.x", "retry-axios": "<3.x" } }, "sha512-QjxiJSt8woyPaaQIUUDNL1nRfCEXTiv8KfJSNq/YzKEUVXABT75GLG+Zo267UwOcq70n8OsZbaro5VrY962mJg=="],
 
     "@googlemaps/url-signature": ["@googlemaps/url-signature@1.0.40", "", { "dependencies": { "crypto-js": "^4.2.0" } }, "sha512-Gme3JxGZWQ4NVpATajSpS2/inQzhUxRvr/FK6IFpcC7AHOAmx8blI0y1/Qi2jqil+WoQ3TkEqq/MaKVtuV68RQ=="],
@@ -244,6 +246,8 @@
     "@langchain/google-common": ["@langchain/google-common@0.2.10", "", { "dependencies": { "uuid": "^10.0.0", "zod-to-json-schema": "^3.22.4" }, "peerDependencies": { "@langchain/core": ">=0.3.55 <0.4.0" } }, "sha512-3QcKnpLZBO1rYyeb/iOnL46r5N5iubNK/EZg2gdvO8SAcB+6lDaJY5mMBdA9Cbs8HwwhGDIvuw/R/zI7AMuXPw=="],
 
     "@langchain/google-gauth": ["@langchain/google-gauth@0.2.10", "", { "dependencies": { "@langchain/google-common": "^0.2.10", "google-auth-library": "^9.15.1" }, "peerDependencies": { "@langchain/core": ">=0.3.55 <0.4.0" } }, "sha512-3AUxjZUKvk9Z009yfJq1dm8adgTn8tYgDkxN/NIobQtCtSCvYyeAhO7XsNGcFuczym9UBXzx1gfCq9+SZ4P+BQ=="],
+
+    "@langchain/google-genai": ["@langchain/google-genai@0.2.18", "", { "dependencies": { "@google/generative-ai": "^0.24.0", "uuid": "^11.1.0" }, "peerDependencies": { "@langchain/core": ">=0.3.58 <0.4.0" } }, "sha512-m9EiN3VKC01A7/625YQ6Q1Lqq8zueewADX4W5Tcme4RImN75zkg2Z7FYbD1Fo6Zwolc4wBNO6LUtbg3no4rv1Q=="],
 
     "@langchain/google-vertexai": ["@langchain/google-vertexai@0.2.10", "", { "dependencies": { "@langchain/google-gauth": "^0.2.10" }, "peerDependencies": { "@langchain/core": ">=0.3.55 <0.4.0" } }, "sha512-XOPUxmsC0vlrtXBrCc3kplb/HbP6D4oj6gR74/vSKqWpgnsm7oDpbyzNg9zYpB9B1Ctps93wQYQzF74JRbOq1g=="],
 

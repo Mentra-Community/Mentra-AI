@@ -4,11 +4,8 @@ import {
   GIVE_APP_CONTROL_OF_TOOL_RESPONSE,
   logger as _logger
 } from '@mentra/sdk';
-import { MiraAgent, CameraQuestionAgent } from '../agents';
-import { wrapText, getCancellationDecider, CancellationDecision } from '../utils';
-import { getVisionQueryDecider, VisionQueryDecider, VisionDecision } from '../utils/vision-query-decider';
-import { getRecallMemoryDecider, RecallMemoryDecider, RecallDecision } from '../utils/recall-memory-decider';
-import { getAppToolQueryDecider, AppToolQueryDecider, AppToolDecision } from '../utils/app-tool-query-decider';
+import { MiraAgent } from '../agents';
+import { wrapText } from '../utils';
 import { getLocationQueryType } from '../utils/location-query-decider';
 import { ChatManager } from './chat.manager';
 import { PhotoManager } from './photo.manager';
@@ -22,50 +19,49 @@ interface QueryProcessorConfig {
   sessionId: string;
   userId: string;
   miraAgent: MiraAgent;
-  cameraQuestionAgent?: CameraQuestionAgent;
   serverUrl: string;
   chatManager?: ChatManager;
   photoManager: PhotoManager;
   audioManager: AudioPlaybackManager;
   wakeWordDetector: WakeWordDetector;
-  onConversationTurn?: (query: string, response: string, photoTimestamp?: number) => void; // Callback to save conversation turn
-  onLocationRequest?: () => Promise<void>; // Callback to fetch and process location (lazy geocoding)
+  onConversationTurn?: (query: string, response: string, photoTimestamp?: number) => void;
+  onLocationRequest?: () => Promise<void>;
 }
 
 /**
- * Handles query processing and response generation
+ * Handles query processing and response generation.
+ *
+ * Simplified single-pass pipeline:
+ *   Wake word → photo (always) → MiraAgent (with image in user message) → response
  */
 export class QueryProcessor {
   private session: AppSession;
   private sessionId: string;
   private userId: string;
   private miraAgent: MiraAgent;
-  private cameraQuestionAgent?: CameraQuestionAgent;
   private serverUrl: string;
   private chatManager?: ChatManager;
   private photoManager: PhotoManager;
   private audioManager: AudioPlaybackManager;
   private wakeWordDetector: WakeWordDetector;
   private currentQueryMessageId?: string;
-  private visionQueryDecider: VisionQueryDecider;
-  private recallMemoryDecider: RecallMemoryDecider;
-  private appToolQueryDecider: AppToolQueryDecider;
   private onConversationTurn?: (query: string, response: string, photoTimestamp?: number) => void;
   private onLocationRequest?: () => Promise<void>;
+
+  // Set to true by TranscriptionManager when a wake word interrupts this query.
+  // Checked before speaking so an interrupted query doesn't play audio over the new one.
+  public aborted: boolean = false;
+
   constructor(config: QueryProcessorConfig) {
     this.session = config.session;
     this.sessionId = config.sessionId;
     this.userId = config.userId;
     this.miraAgent = config.miraAgent;
-    this.cameraQuestionAgent = config.cameraQuestionAgent;
     this.serverUrl = config.serverUrl;
     this.chatManager = config.chatManager;
     this.photoManager = config.photoManager;
     this.audioManager = config.audioManager;
     this.wakeWordDetector = config.wakeWordDetector;
-    this.visionQueryDecider = getVisionQueryDecider();
-    this.recallMemoryDecider = getRecallMemoryDecider();
-    this.appToolQueryDecider = getAppToolQueryDecider();
     this.onConversationTurn = config.onConversationTurn;
     this.onLocationRequest = config.onLocationRequest;
   }
@@ -74,6 +70,7 @@ export class QueryProcessor {
    * Process and respond to the user's query
    */
   async processQuery(rawText: string, timerDuration: number, transcriptionStartTime: number, activeSpeakerId?: string): Promise<boolean> {
+    this.aborted = false; // Reset abort flag for this new query
     const processQueryStartTime = Date.now();
     console.log(`\n${"█".repeat(70)}`);
     console.log(`⏱️  [TIMESTAMP] 🚀 processQuery START: ${new Date().toISOString()}`);
@@ -103,8 +100,6 @@ export class QueryProcessor {
     }
 
     // Get the transcript text - use only the LAST segment (final or interim)
-    // Speech-to-text providers send cumulative text in each segment, so we only need the last one
-    // Using multiple segments causes duplication when queries arrive close together
     let segments = transcriptionResponse.segments;
     let rawCombinedText = '';
 
@@ -120,7 +115,6 @@ export class QueryProcessor {
     }
 
     if (segments.length > 0) {
-      // Always use the LAST segment - it contains the most complete/recent text
       const lastSegment = segments[segments.length - 1];
       rawCombinedText = lastSegment.text;
       console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📊 Using LAST segment (${lastSegment.isFinal ? 'FINAL' : 'interim'}) out of ${segments.length} total`);
@@ -129,40 +123,15 @@ export class QueryProcessor {
     console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📊 Raw transcript: "${rawCombinedText}"`);
 
     // Remove wake word from query
-    const query = this.wakeWordDetector.removeWakeWord(rawCombinedText);
+    let query = this.wakeWordDetector.removeWakeWord(rawCombinedText);
 
     // Clear transcripts from backend to prevent accumulation
     this.clearTranscripts(transcriptionStartTime).catch((err: Error) => {
       logger.warn(`Failed to clear transcripts: ${err.message}`);
     });
 
-    // Check if query is just an affirmative phrase (e.g., "Hey Mentra, thank you")
-    // Use AI-powered detection for accurate intent recognition
-    const cancellationDecider = getCancellationDecider();
-    const isAffirmative = await cancellationDecider.isAffirmativePhraseAI(query);
-
-    if (isAffirmative) {
-      console.log(`✅ [${new Date().toISOString()}] Initial query is affirmative phrase - not processing`);
-      stopProcessingSounds();
-      // Play a simple acknowledgment instead of entering follow-up mode
-      await this.audioManager.showOrSpeakText("You're welcome!");
-      return false; // Don't enter follow-up mode for affirmative phrases
-    }
-
-    // Check if query is a cancellation phrase using AI-powered detection (safety net)
-    // This prevents false positives like "help me cancel my appointment" being treated as cancellation
-    const cancellationCheck = await cancellationDecider.checkIfWantsToCancelAsync(query);
-    if (cancellationCheck === CancellationDecision.CANCEL) {
-      logger.debug("Cancellation detected in processQuery (AI-powered)");
-      stopProcessingSounds();
-      await this.audioManager.playCancellation();
-      this.session.layouts.showTextWall("Cancelled", { durationMs: 2000 });
-      return false; // Don't enter follow-up mode for cancellation phrases
-    }
-
     if (query.trim().length === 0) {
       stopProcessingSounds();
-      // Play cancellation sound as feedback for empty query
       await this.audioManager.playCancellation();
       this.session.layouts.showTextWall(
         wrapText("No query provided.", 30),
@@ -175,35 +144,26 @@ export class QueryProcessor {
       console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📝 Query extracted: "${query}"`);
 
       // LAZY GEOCODING: Only fetch location data when user asks location-related questions
-      // This saves ~4 API calls per query that doesn't need location
       const locationQueryType = getLocationQueryType(query);
       if (locationQueryType !== 'none' && this.onLocationRequest) {
         console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📍 Location query detected (${locationQueryType}) - fetching location...`);
         await this.onLocationRequest();
         console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📍 Location data fetched`);
-      } else {
-        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📍 No location query detected - skipping geocoding APIs`);
       }
 
       // Show the query being processed
       this.showProcessingMessage(query);
 
-      // Get conversation history for context-aware decisions
-      const conversationHistory = this.miraAgent.getConversationHistoryForDecider();
-
       // Check if this is a response to a pending disambiguation (e.g., user answering "which app?")
-      // This check MUST happen before recallDecision to prevent misclassification as RECALL
       if (this.miraAgent.hasPendingDisambiguation()) {
         console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📋 Pending disambiguation detected - routing to MiraAgent`);
         stopProcessingSounds();
 
-        // Send query to frontend
         if (this.chatManager && query.trim().length > 0 && !this.currentQueryMessageId) {
           this.currentQueryMessageId = this.chatManager.addUserMessage(this.userId, query);
           this.chatManager.setProcessing(this.userId, true);
         }
 
-        // Route directly to MiraAgent which will handle the disambiguation response
         const agentResponse = await this.miraAgent.handleContext({
           query,
           originalQuery: query,
@@ -216,198 +176,49 @@ export class QueryProcessor {
         return true;
       }
 
-      // Check if this is a memory recall or vision retry query (AI-powered with conversation context)
-      const recallDecision = await this.recallMemoryDecider.checkIfNeedsRecall(query, conversationHistory);
+      // ── Single-pass pipeline: get photo, route to MiraAgent ──
 
-      // Handle VISION_RETRY - user is retrying a vision query (e.g., "how about now?")
-      if (recallDecision === RecallDecision.VISION_RETRY) {
-        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 🔄 VISION RETRY DETECTED - Injecting previous context`);
-
-        // Get the last conversation turn to find what the user was originally asking about
-        const fullHistory = this.miraAgent.getFullConversationHistory();
-        let enhancedQuery = query;
-
-        if (fullHistory.length > 0) {
-          // Get the most recent turn - this should contain the previous vision query
-          const lastTurn = fullHistory[fullHistory.length - 1];
-          // Enhance the retry query with the previous context
-          enhancedQuery = `${lastTurn.query}\n\n[USER IS NOW SAYING: "${query}" - This is a retry/follow-up. They are repositioning to show you what they originally asked about. Answer their original question: "${lastTurn.query}"]`;
-          console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📚 Enhanced retry query with previous context: "${lastTurn.query}"`);
-        }
-
-        // Route to CameraQuestionAgent with enhanced query
-        const photoStartTime = Date.now();
-        console.log(`⏱️  [+${photoStartTime - processQueryStartTime}ms] 📸 Getting photo for vision retry...`);
-        const photo = await this.photoManager.getPhoto(false);
-        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ${photo ? '✅ Photo retrieved' : '⚪ No photo available (will wait only if needed)'}`);
-
-        // Send query to frontend
-        if (this.chatManager && query.trim().length > 0 && !this.currentQueryMessageId) {
-          this.currentQueryMessageId = this.chatManager.addUserMessage(this.userId, query);
-          this.chatManager.setProcessing(this.userId, true);
-        }
-
-        // Create callback for agent to wait for photo if needed
-        const getPhotoCallback = async (): Promise<PhotoData | null> => {
-          console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📸 Agent requested photo wait - calling getPhoto(true)...`);
-          return await this.photoManager.getPhoto(true);
-        };
-
-        const hasDisplay = this.session.capabilities?.hasDisplay;
-        const inputData = { query: enhancedQuery, photo, getPhotoCallback, hasDisplay };
-
-        if (this.cameraQuestionAgent) {
-          console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📷 Routing vision retry to CameraQuestionAgent...`);
-          const agentResponse = await this.cameraQuestionAgent.handleContext(inputData);
-          console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ✅ CameraQuestionAgent completed`);
-
-          // Store the conversation turn in MiraAgent (use original query, not enhanced)
-          const responseText = agentResponse?.answer || (typeof agentResponse === 'string' ? agentResponse : '');
-          if (responseText) {
-            this.miraAgent.addExternalConversationTurn(query, responseText);
-            console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📚 Added vision retry response to MiraAgent conversation history`);
-          }
-
-          stopProcessingSounds();
-          await this.handleAgentResponse(agentResponse, query, photo, processQueryStartTime);
-        } else {
-          // Fallback to MiraAgent if no CameraQuestionAgent
-          console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 🤖 No CameraQuestionAgent - Routing to MiraAgent...`);
-          const agentResponse = await this.miraAgent.handleContext(inputData);
-          stopProcessingSounds();
-          await this.handleAgentResponse(agentResponse, query, photo, processQueryStartTime);
-        }
-        return true; // Vision retry completed successfully
-      }
-
-      if (recallDecision === RecallDecision.RECALL) {
-        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 🧠 MEMORY RECALL DETECTED - Skipping vision check`);
-        stopProcessingSounds();
-
-        // Send query to frontend
-        if (this.chatManager && query.trim().length > 0 && !this.currentQueryMessageId) {
-          this.currentQueryMessageId = this.chatManager.addUserMessage(this.userId, query);
-          this.chatManager.setProcessing(this.userId, true);
-        }
-
-        // Build enhanced query with explicit conversation context for memory recall
-        const fullHistory = this.miraAgent.getFullConversationHistory();
-        let enhancedQuery = query;
-        if (fullHistory.length > 0) {
-          const contextSummary = fullHistory
-            .map((turn, idx) => {
-              const isLast = idx === fullHistory.length - 1;
-              const prefix = isLast
-                ? `[${idx + 1}] (MOST RECENT - REPEAT THIS ONE IF USER SAYS "REPEAT THAT")`
-                : `[${idx + 1}]`;
-              return `${prefix} User asked: "${turn.query}" -> You answered: "${turn.response}"`;
-            })
-            .join('\n');
-          enhancedQuery = `${query}\n\n[IMPORTANT - MEMORY RECALL: The user is asking you to recall/repeat information from our previous conversation. You MUST extract the relevant information from the conversation history below and provide it in your response. Do NOT just say "that's the summary" - actually repeat the specific details they're asking about.]\n\n[CONTEXT FROM PREVIOUS EXCHANGES:\n${contextSummary}]`;
-          console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📚 Injected ${fullHistory.length} conversation turns into query`);
-        }
-
-        // Route directly to MiraAgent for memory recall (no photo needed)
-        const agentResponse = await this.miraAgent.handleContext({
-          query: enhancedQuery,
-          originalQuery: query, // Pass original query for conversation history storage
-          photo: null,
-          getPhotoCallback: async () => null,
-          hasDisplay: this.session.capabilities?.hasDisplay,
-        });
-
-        await this.handleAgentResponse(agentResponse, query, null, processQueryStartTime);
-        return true; // Memory recall completed successfully
-      }
-
-      // Check if this is an app tool query (AI-powered with available tools context)
-      const availableTools = this.miraAgent.getToolInfo();
-      const appToolDecision = await this.appToolQueryDecider.checkIfNeedsAppTool(query, availableTools, conversationHistory);
-      console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 🔧 App tool decision: ${appToolDecision}`);
-
-      // Determine if we should use minimal tools (for non-app-tool queries)
-      // UNSURE is treated as APP_TOOL - use full tools and let the AI decide
-      const useMinimalTools = appToolDecision === AppToolDecision.NO_TOOL;
-
-      // Skip vision check if this is clearly an app tool query
-      // APP_TOOL queries are for tools like "what apps am I running", not vision queries
-      let visionDecision = VisionDecision.NO;
-      if (appToolDecision !== AppToolDecision.APP_TOOL) {
-        // Detect vision queries using AI decider (YES/NO)
-        visionDecision = await this.visionQueryDecider.checkIfNeedsCamera(query, conversationHistory);
-        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 🤖 Vision decision: ${visionDecision}`);
-      } else {
-        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 🤖 Vision decision: SKIPPED (APP_TOOL query)`);
-      }
-
-      const isVisionQuery = visionDecision === VisionDecision.YES;
-      if (isVisionQuery) {
-        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 👁️  VISION QUERY DETECTED`);
-        // NOTE: We no longer clear conversation history here to preserve context for follow-up questions
-        // Users may ask follow-up questions like "tell me more about that brand" or "what else do they make?"
-      }
-
-      // Get photo without waiting (non-blocking) - returns cached photo or null
+      // Try to get cached photo first (non-blocking), fall back to waiting
       const photoStartTime = Date.now();
-      console.log(`⏱️  [+${photoStartTime - processQueryStartTime}ms] 📸 Getting photo from wake word activation...`);
-      const photo = await this.photoManager.getPhoto(false);
-      console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ${photo ? '✅ Photo retrieved' : '⚪ No photo available (will wait only if needed)'}`);
+      console.log(`⏱️  [+${photoStartTime - processQueryStartTime}ms] 📸 Checking for photo...`);
+      let photo = await this.photoManager.getPhoto(false);
+      if (!photo) {
+        // Photo not ready yet — wait up to 3s (shorter than the old 5s to avoid blocking)
+        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📸 No cached photo, waiting up to 3s...`);
+        photo = await this.photoManager.getPhoto(true);
+      }
+      console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ${photo ? '✅ Photo retrieved' : '⚪ No photo available'}`);
 
-      // Send query to frontend if not already sent
+      // Send query to frontend
       if (this.chatManager && query.trim().length > 0 && !this.currentQueryMessageId) {
         this.currentQueryMessageId = this.chatManager.addUserMessage(this.userId, query);
         this.chatManager.setProcessing(this.userId, true);
       }
 
-      // Create callback for agent to wait for photo if needed
+      // Create callback for agent to wait for photo if needed (fallback)
       const getPhotoCallback = async (): Promise<PhotoData | null> => {
         console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📸 Agent requested photo wait - calling getPhoto(true)...`);
         return await this.photoManager.getPhoto(true);
       };
 
       const hasDisplay = this.session.capabilities?.hasDisplay;
-      const inputData = { query, photo, getPhotoCallback, hasDisplay, useMinimalTools };
+      const inputData = { query, originalQuery: query, photo, getPhotoCallback, hasDisplay };
 
-      // Route to appropriate agent based on query type
-      let agentResponse: any;
+      // Single agent call — MiraAgent handles everything (vision + tools + text)
       const agentStartTime = Date.now();
-
-      // Use CameraQuestionAgent for vision queries if available
-      if (isVisionQuery && this.cameraQuestionAgent) {
-        console.log(`⏱️  [+${agentStartTime - processQueryStartTime}ms] 📷 Routing to CameraQuestionAgent...`);
-
-        // Build location context string for camera agent
-        const loc = this.miraAgent.getLocationContext();
-        const locationParts: string[] = [];
-        if (loc.streetAddress) locationParts.push(`on ${loc.streetAddress}`);
-        if (loc.neighborhood) locationParts.push(`in the ${loc.neighborhood} area`);
-        if (loc.city !== 'Unknown') locationParts.push(`in ${loc.city}, ${loc.state}, ${loc.country}`);
-        const locationContext = locationParts.length > 0 ? locationParts.join(', ') : undefined;
-
-        agentResponse = await this.cameraQuestionAgent.handleContext({ ...inputData, locationContext });
-        const agentEndTime = Date.now();
-        console.log(`⏱️  [+${agentEndTime - processQueryStartTime}ms] ✅ CameraQuestionAgent completed (took ${agentEndTime - agentStartTime}ms)`);
-
-        // Store the conversation turn in MiraAgent so recall queries can access it
-        const responseText = agentResponse?.answer || (typeof agentResponse === 'string' ? agentResponse : '');
-        if (responseText) {
-          this.miraAgent.addExternalConversationTurn(query, responseText);
-          console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📚 Added CameraQuestionAgent response to MiraAgent conversation history`);
-        }
-      } else {
-        // Use MiraAgent for general queries (not a vision query)
-        // Keep the photo so it can be streamed to the frontend
-        if (!isVisionQuery && photo) {
-          console.log(`⏱️  [+${agentStartTime - processQueryStartTime}ms] 📸 Vision decider: NO - keeping photo for frontend display`);
-        }
-        console.log(`⏱️  [+${agentStartTime - processQueryStartTime}ms] 🤖 Invoking MiraAgent.handleContext...`);
-        agentResponse = await this.miraAgent.handleContext(inputData);
-        const agentEndTime = Date.now();
-        console.log(`⏱️  [+${agentEndTime - processQueryStartTime}ms] ✅ MiraAgent completed (took ${agentEndTime - agentStartTime}ms)`);
-      }
+      console.log(`⏱️  [+${agentStartTime - processQueryStartTime}ms] 🤖 Routing to MiraAgent (single pass)...`);
+      const agentResponse = await this.miraAgent.handleContext(inputData);
+      const agentEndTime = Date.now();
+      console.log(`⏱️  [+${agentEndTime - processQueryStartTime}ms] ✅ MiraAgent completed (took ${agentEndTime - agentStartTime}ms)`);
 
       // Stop processing sounds
       stopProcessingSounds();
+
+      // If this query was aborted by a wake word interrupt, skip response delivery
+      if (this.aborted) {
+        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 🚫 Query was aborted — skipping response`);
+        return false;
+      }
 
       // Handle response
       await this.handleAgentResponse(agentResponse, query, photo, processQueryStartTime);
@@ -418,14 +229,14 @@ export class QueryProcessor {
       console.log(`⏱️  Total time from start to finish: ${(totalProcessTime / 1000).toFixed(2)}s (${totalProcessTime}ms)`);
       console.log(`${"█".repeat(70)}\n`);
 
-      return true; // Query processed successfully - allow follow-up mode
+      return true;
 
     } catch (error) {
       console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ❌ Error in processQuery`);
       logger.error(error, `[Session ${this.sessionId}]: Error processing query:`);
       await this.audioManager.showOrSpeakText("Sorry, there was an error processing your request.");
       stopProcessingSounds();
-      return false; // Error occurred - don't enter follow-up mode
+      return false;
     }
   }
 
@@ -433,10 +244,8 @@ export class QueryProcessor {
    * Fetch transcript from backend
    */
   private async fetchTranscript(durationSeconds: number, processQueryStartTime: number, transcriptionStartTime?: number): Promise<any | null> {
-    // Add timestamp filter to prevent getting old transcripts
     let backendUrl = `${this.serverUrl}/api/transcripts/${this.sessionId}?duration=${durationSeconds}`;
     if (transcriptionStartTime && transcriptionStartTime > 0) {
-      // Use startTime parameter which the backend supports (ISO format)
       backendUrl += `&startTime=${new Date(transcriptionStartTime).toISOString()}`;
       console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 🕐 Filtering transcripts after timestamp: ${transcriptionStartTime} (${new Date(transcriptionStartTime).toISOString()})`);
     }
@@ -527,7 +336,6 @@ export class QueryProcessor {
     photo: PhotoData | null,
     processQueryStartTime: number
   ): Promise<void> {
-    // Extract answer and needsCamera flag from response
     let finalAnswer: string;
     let needsCamera = false;
 
@@ -567,7 +375,6 @@ export class QueryProcessor {
         const displayStartTime = Date.now();
         console.log(`⏱️  [+${displayStartTime - processQueryStartTime}ms] 📱 Sending response to user...`);
 
-        // Send response to webview FIRST (before audio starts playing)
         if (this.chatManager) {
           console.log(`\n${"=".repeat(70)}`);
           console.log(`📱 [WEBVIEW] Sending response to webview for user: ${this.userId}`);
@@ -579,23 +386,18 @@ export class QueryProcessor {
           console.warn(`⚠️  [WEBVIEW] ChatManager not available - webview won't receive response`);
         }
 
-        // Log response time (query to AI response ready, before audio)
         const responseTime = Date.now() - processQueryStartTime;
         console.log(`\n${"=".repeat(70)}`);
         console.log(`⏱️  [TIMESTAMP] 🎯 AI RESPONSE READY!`);
         console.log(`⏱️  Time from query to response: ${(responseTime / 1000).toFixed(2)}s (${responseTime}ms)`);
         console.log(`${"=".repeat(70)}\n`);
 
-        // Then display/speak on glasses
-        // We await this to ensure audio completes before releasing the processing lock
         await this.audioManager.showOrSpeakText(finalAnswer);
 
         console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ✅ Response sent and audio completed`);
 
-        // Save conversation turn to database (if callback is set)
         if (this.onConversationTurn) {
-          // Get photo timestamp if camera was used
-          const photoTimestamp = needsCamera && photo ? Date.now() : undefined;
+          const photoTimestamp = photo ? Date.now() : undefined;
           this.onConversationTurn(query, finalAnswer, photoTimestamp);
           console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 💾 Conversation turn saved to database`);
         }
@@ -605,7 +407,6 @@ export class QueryProcessor {
 
   /**
    * Update user message with photo if available
-   * Always attaches the captured photo to the user's message so it streams in the frontend
    */
   private async updateMessageWithPhoto(_needsCamera: boolean, query: string, photo: PhotoData | null): Promise<void> {
     let finalPhoto = photo;
@@ -627,7 +428,6 @@ export class QueryProcessor {
       console.log(`📱 [WEBVIEW] 📷 Including photo (${finalPhoto.mimeType}, ${finalPhoto.size} bytes) - always streaming photo to frontend`);
       console.log(`${"=".repeat(70)}\n`);
 
-      // Try to update the existing message if we have its ID
       if (this.currentQueryMessageId) {
         const updated = this.chatManager.updateUserMessage(this.userId, this.currentQueryMessageId, query, photoBase64);
         if (!updated) {
@@ -654,12 +454,9 @@ export class QueryProcessor {
     if (typeof finalAnswer === 'string') {
       try {
         const parsed = JSON.parse(finalAnswer);
-
-        // Generic event handler for tool outputs
         if (parsed && parsed.event) {
           switch (parsed.event) {
             default:
-              // Unknown event, fall through to default display
               break;
           }
         }
@@ -678,8 +475,7 @@ export class QueryProcessor {
   }
 
   /**
-   * Check if there's a pending disambiguation (AI asked user to choose between options)
-   * This is used to force follow-up mode even if it's disabled in settings
+   * Check if there's a pending disambiguation
    */
   hasPendingDisambiguation(): boolean {
     return this.miraAgent.hasPendingDisambiguation();
