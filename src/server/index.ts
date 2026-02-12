@@ -209,11 +209,19 @@ class MiraServer extends AppServer {
     this.userIdToSessionId.set(userId, sessionId); // Track userId -> sessionId mapping
 
     // Welcome message
-    // session.layouts.showReferenceCard(
-    //   "Mira AI",
-    //   "Virtual assistant connected",
-    //   { durationMs: 3000 }
-    // );
+    if (session.capabilities?.hasDisplay) {
+      session.layouts.showTextWall('Mentra AI\n\nWelcome to Mentra AI.\nSay "Hey Mentra" followed by your question.', { durationMs: 3000 });
+    } else {
+      // Camera-only glasses: play welcome audio file after a short delay
+      const welcomeSoundUrl = process.env.WELCOME_SOUND_URL;
+      if (welcomeSoundUrl) {
+        setTimeout(() => {
+          session.audio.playAudio({ audioUrl: welcomeSoundUrl }).catch((err) => {
+            logger.debug('Welcome audio failed:', err);
+          });
+        }, 750);
+      }
+    }
 
     // Do not subscribe globally to transcription in head-up mode.
     // Each TranscriptionManager manages its own subscription to save battery.
