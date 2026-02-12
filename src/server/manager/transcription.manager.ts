@@ -333,12 +333,12 @@ export class TranscriptionManager {
     }
 
     // Start transcription timer if not already started
-    // Request photo ONLY at the start of a new follow-up query (not on every transcription)
+    // Do NOT request a new photo for follow-up queries — the visual context hasn't changed
+    // since the previous query (only seconds ago). This prevents the camera from firing
+    // repeatedly while the user is mid-conversation.
     if (this.transcriptionStartTime === 0) {
-      // Request a fresh photo for potential vision query
-      this.photoManager.requestPhoto();
       this.transcriptionStartTime = Date.now();
-      console.log(`⏱️  [${new Date().toISOString()}] 🎙️ Started follow-up transcription at: ${this.transcriptionStartTime}`);
+      console.log(`⏱️  [${new Date().toISOString()}] 🎙️ Started follow-up transcription at: ${this.transcriptionStartTime} (no photo — reusing context from previous query)`);
     }
 
     // Show the live query (no "Listening..." prefix for follow-up)
