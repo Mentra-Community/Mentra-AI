@@ -217,6 +217,8 @@ export class QueryProcessor {
       // If this query was aborted by a wake word interrupt, skip response delivery
       if (this.aborted) {
         console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 🚫 Query was aborted — skipping response`);
+        // Play the start-listening sound so user gets feedback that interrupt worked
+        this.audioManager.playStartListening().catch(() => {});
         return false;
       }
 

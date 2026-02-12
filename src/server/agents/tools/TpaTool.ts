@@ -202,7 +202,11 @@ async function getRunningAppPackages(cloudUrl: string, userId: string): Promise<
     console.log(`[getRunningAppPackages] Found ${runningPackages.size} running apps: ${Array.from(runningPackages).join(', ')}`);
     return runningPackages;
   } catch (error) {
-    console.error(`[getRunningAppPackages] Error fetching running apps:`, error);
+    if (axios.isAxiosError(error)) {
+      console.error(`[getRunningAppPackages] Error fetching running apps: ${error.message} (status: ${error.response?.status})`);
+    } else {
+      console.error(`[getRunningAppPackages] Error fetching running apps:`, (error as Error).message);
+    }
     return new Set();
   }
 }
