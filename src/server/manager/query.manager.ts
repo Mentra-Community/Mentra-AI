@@ -6,11 +6,11 @@ import {
 } from '@mentra/sdk';
 import { MiraAgent } from '../agents';
 import { wrapText } from '../utils';
-import { getLocationQueryType } from '../utils/location-query-decider';
+import { getLocationQueryType } from '../utils/geocoding-utils/location-keywords.util';
 import { ChatManager } from './chat.manager';
 import { PhotoManager } from './photo.manager';
 import { AudioPlaybackManager } from './audio-playback.manager';
-import { WakeWordDetector } from './wake-word.detector';
+import { WakeWordDetector } from './wake-word.manager';
 
 const logger = _logger.child({ service: 'QueryProcessor' });
 

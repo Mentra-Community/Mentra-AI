@@ -11,14 +11,12 @@ import { connectToDatabase } from './utils';
 import { getAllToolsForUser } from './agents/tools/TpaTool';
 import { log } from 'console';
 // import { Anim } from './utils/anim';
-import { analyzeImage } from './utils/img-processor.util';
 import { ChatManager } from './manager/chat.manager';
 import express from 'express';
-import { reverseGeocode, getTimezone } from './utils/map.util';
-import { ChatAPI, TranscriptionAPI, DatabaseAPI } from './api';
+import { ChatAPI, DatabaseAPI } from './api';
 import { createChatRoutes, createTranscriptionRoutes, createDbRoutes } from './routes';
 import { explicitWakeWords, cancellationPhrases, visionKeywords } from './constant/wakeWords';
-import { SSEManager, createTranscriptionBroadcaster } from './manager/sse.manager';
+import { SSEManager, createTranscriptionBroadcaster } from './manager/broadcast.manager';
 import { TranscriptionManager, getCleanServerUrl } from './manager/transcription.manager';
 import { notificationsManager } from './manager/notifications.manager';
 import { createTranscriptionStream } from '@mentra/sdk';
@@ -123,12 +121,11 @@ class MiraServer extends AppServer {
     const app = this.getExpressApp() as any;
 
     // Create API controllers
-    const chatAPI = new ChatAPI(this.chatManager);
-    const transcriptionAPI = new TranscriptionAPI(this.transcriptionSSEManager.getConnectionsMap());
+    const chatAPI = new ChatAPI(this.chatManager, this.transcriptionSSEManager.getConnectionsMap());
 
     // Mount routes
     app.use('/api/chat', createChatRoutes(chatAPI));
-    app.use('/api/transcription', createTranscriptionRoutes(transcriptionAPI));
+    app.use('/api/transcription', createTranscriptionRoutes(chatAPI));
     app.use('/api/db', createDbRoutes(this.dbAPI));
 
     logger.info('✅ Chat API routes configured with SSE support');

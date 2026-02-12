@@ -5,8 +5,9 @@
  * edit THIS file — nowhere else.
  */
 
-import { PersonalityType } from './personality';
 import { LLM_MODEL, LLM_PROVIDER } from '../manager/llm.manager';
+
+export type PersonalityType = 'default';
 
 // ─── Tunable Config ─────────────────────────────────────────────────────────
 
@@ -84,11 +85,6 @@ export const DISPLAY_RESPONSE_CONFIGS: Record<ResponseMode, ResponseConfig> = {
 // ─── Personality Instructions ───────────────────────────────────────────────
 
 export const PERSONALITY_INSTRUCTIONS: Record<PersonalityType, string> = {
-  friendly: 'CRITICAL: THE VERY FIRST WORD OF YOUR FINAL ANSWER *MUST* BE "Bro" OR "Bro," - NO EXCEPTIONS. IF YOU DO NOT START WITH "Bro", YOUR RESPONSE WILL BE REJECTED. THIS IS NON-NEGOTIABLE.',
-  quirky: 'YOUR RESPONSE MUST INCLUDE AT LEAST ONE JOKE, PUN, OR WORDPLAY - THIS IS ABSOLUTELY MANDATORY. Use fun expressive words like "magnificent", "spectacular", "delightful", "wowza", "holy moly".',
-  professional: 'USE BUSINESS TERMINOLOGY (optimize, leverage, strategic, metrics, actionable) AND STRUCTURED FORMAT WITH CLEAR LABELS (e.g., "STATUS:", "RECOMMENDATION:"). Think executive briefing style.',
-  candid: 'BE BRUTALLY DIRECT AND BLUNT. Zero fluff, zero sugar-coating. Tell it like it is. Skip pleasantries.',
-  efficient: 'EXTREME BREVITY REQUIRED. Use shortest possible words. Single syllables preferred. Pure signal, zero noise. Answer first, details only if critical.',
   default: 'Use clear, balanced, professional yet approachable language.',
 };
 

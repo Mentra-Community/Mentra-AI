@@ -7,10 +7,10 @@ import { TranscriptProcessor } from '../utils';
 import { ChatManager } from './chat.manager';
 import { notificationsManager } from './notifications.manager';
 import { PhotoManager } from './photo.manager';
-import { LocationService, clearLocationCacheForSession } from './location.service';
+import { LocationService, clearLocationCacheForSession } from './geolocation.manager';
 import { AudioPlaybackManager } from './audio-playback.manager';
-import { WakeWordDetector } from './wake-word.detector';
-import { QueryProcessor } from './query.processor';
+import { WakeWordDetector } from './wake-word.manager';
+import { QueryProcessor } from './query.manager';
 import { UserSettings } from '../schemas';
 
 const logger = _logger.child({ service: 'TranscriptionManager' });

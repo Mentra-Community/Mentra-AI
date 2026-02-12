@@ -5,18 +5,20 @@ import { logger as _logger } from '@mentra/sdk';
 const logger = _logger.child({ service: 'ChatAPI' });
 
 /**
- * Chat API controller - handles the core logic for chat endpoints
+ * Chat & Transcription API controller
+ * Handles chat endpoints, SSE streaming, and live transcription streaming
  */
 export class ChatAPI {
   private chatManager: ChatManager;
+  private transcriptionSSEConnections: Map<string, Set<Response>>;
 
-  constructor(chatManager: ChatManager) {
+  constructor(chatManager: ChatManager, transcriptionSSEConnections?: Map<string, Set<Response>>) {
     this.chatManager = chatManager;
+    this.transcriptionSSEConnections = transcriptionSSEConnections || new Map();
   }
 
   /**
    * POST /api/chat/message
-   * Send a chat message
    */
   async sendMessage(req: Request, res: Response): Promise<void> {
     try {
@@ -27,7 +29,6 @@ export class ChatAPI {
         return;
       }
 
-      // Process message asynchronously
       this.chatManager.processMessage(userId, message).catch((error: Error) => {
         logger.error(error, 'Error processing chat message:');
       });
@@ -41,7 +42,6 @@ export class ChatAPI {
 
   /**
    * GET /api/chat/history
-   * Get chat history for a user
    */
   getHistory(req: Request, res: Response): void {
     try {
@@ -53,7 +53,6 @@ export class ChatAPI {
       }
 
       const messages = this.chatManager.getChatHistory(userId);
-      console.log("GETTING history");
       res.json({ messages });
     } catch (error) {
       logger.error(error as Error, 'Error in getHistory:');
@@ -63,7 +62,6 @@ export class ChatAPI {
 
   /**
    * DELETE /api/chat/clear
-   * Clear chat history for a user
    */
   clearHistory(req: Request, res: Response): void {
     try {
@@ -74,7 +72,7 @@ export class ChatAPI {
         return;
       }
 
-      logger.info(`🗑️ Clearing chat data for user ${userId}`);
+      logger.info(`Clearing chat data for user ${userId}`);
       this.chatManager.cleanupUserOnDisconnect(userId);
 
       res.json({ success: true, message: 'Chat history cleared' });
@@ -86,7 +84,7 @@ export class ChatAPI {
 
   /**
    * GET /api/chat/stream
-   * Server-Sent Events endpoint for real-time chat updates
+   * SSE endpoint for real-time chat updates
    */
   streamChat(req: Request, res: Response): void {
     const userId = req.query.userId as string;
@@ -96,9 +94,8 @@ export class ChatAPI {
       return;
     }
 
-    console.log(`[SSE] 📡 Setting up event stream for user ${userId}`);
+    console.log(`[SSE] Setting up event stream for user ${userId}`);
 
-    // Set SSE headers
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
@@ -106,23 +103,64 @@ export class ChatAPI {
       'Access-Control-Allow-Origin': '*',
     });
 
-    // Register this SSE connection with ChatManager
     this.chatManager.registerSSE(userId, res);
 
-    // Send initial history
     const history = this.chatManager.getChatHistory(userId);
     res.write(`data: ${JSON.stringify({ type: 'history', messages: history })}\n\n`);
 
-    // Keepalive ping every 30 seconds
     const keepAlive = setInterval(() => {
       res.write(`: keepalive\n\n`);
     }, 30000);
 
-    // Cleanup on disconnect
     req.on('close', () => {
       clearInterval(keepAlive);
       this.chatManager.unregisterSSE(userId, res);
-      console.log(`[SSE] 🔌 Connection closed for user ${userId}`);
+      console.log(`[SSE] Connection closed for user ${userId}`);
+    });
+  }
+
+  /**
+   * GET /api/transcription/stream
+   * SSE endpoint for live transcription streaming
+   */
+  streamTranscription(req: Request, res: Response): void {
+    const userId = req.query.userId as string;
+
+    if (!userId) {
+      res.status(400).json({ error: 'userId is required' });
+      return;
+    }
+
+    console.log(`[TRANSCRIPTION SSE] Setting up transcription stream for user ${userId}`);
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+    });
+
+    if (!this.transcriptionSSEConnections.has(userId)) {
+      this.transcriptionSSEConnections.set(userId, new Set());
+    }
+    this.transcriptionSSEConnections.get(userId)!.add(res);
+
+    res.write(`data: ${JSON.stringify({ type: 'connected', message: 'Transcription stream connected' })}\n\n`);
+
+    const keepAlive = setInterval(() => {
+      res.write(`: keepalive\n\n`);
+    }, 30000);
+
+    req.on('close', () => {
+      clearInterval(keepAlive);
+      const connections = this.transcriptionSSEConnections.get(userId);
+      if (connections) {
+        connections.delete(res);
+        if (connections.size === 0) {
+          this.transcriptionSSEConnections.delete(userId);
+        }
+      }
+      console.log(`[TRANSCRIPTION SSE] Connection closed for user ${userId}`);
     });
   }
 }

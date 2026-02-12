@@ -1,6 +1,14 @@
 // MiraAgent.ts
 
-import { Agent } from "./AgentInterface";
+export interface Agent {
+  agentId: string;
+  agentName: string;
+  agentDescription: string;
+  agentPrompt: string;
+  agentTools: any[];
+  handleContext(inputData: any): Promise<{ [key: string]: any }>;
+}
+
 import { AgentExecutor, createReactAgent } from "langchain/agents";
 import { SearchToolForAgents } from "./tools/SearchToolForAgents";
 import { PromptTemplate } from "@langchain/core/prompts";
@@ -12,17 +20,10 @@ import { Tool, StructuredTool } from "langchain/tools";
 import { TpaCommandsTool, TpaListAppsTool, TpaListAppsWithToolsTool } from "./tools/TpaCommandsTool";
 import { SmartAppControlTool } from "./tools/SmartAppControlTool";
 import { TpaToolInvokeTool } from "./tools/TpaToolInvokeTool";
-import { AppManagementAgent } from "./AppManagementAgent";
-
 import { ThinkingTool } from "./tools/ThinkingTool";
 import { Calculator } from "@langchain/community/tools/calculator";
 import { AppServer, PhotoData, GIVE_APP_CONTROL_OF_TOOL_RESPONSE, logger as _logger } from "@mentra/sdk";
 import type { Logger } from "pino";
-import { analyzeImage } from "../utils/img-processor.util";
-import * as fs from "node:fs";
-import * as path from "node:path";
-import * as os from "node:os";
-import { MIRA_SYSTEM_PROMPT } from "../constant/prompts";
 import {
   ResponseMode,
   CAMERA_RESPONSE_CONFIGS,
@@ -32,11 +33,9 @@ import {
   MAX_TOOL_TURNS,
   buildUnifiedPrompt,
   PERSONALITY_INSTRUCTIONS,
+  PersonalityType,
 } from "../constant/unifiedPrompt";
-import { UserSettings } from "../schemas";
-import { buildSystemPromptWithPersonality } from "../utils/prompt.util";
-import { PersonalityType } from "../constant/personality";
-import { getDisambiguationDetector, DisambiguationCandidate } from "../utils/disambiguation-detector";
+import { getDisambiguationDetector, DisambiguationCandidate } from "../utils/disambiguation-detector.util";
 
 interface QuestionAnswer {
     insight: string;
@@ -61,9 +60,8 @@ export class MiraAgent implements Agent {
   public agentName = "MiraAgent";
   public agentDescription =
     "Answers user queries from smart glasses using conversation context and history.";
-  public agentPrompt = MIRA_SYSTEM_PROMPT;
+  public agentPrompt = "Mentra AI - smart glasses assistant";
   public agentTools:(Tool | StructuredTool)[];
-  private appManagementAgent: AppManagementAgent;
   private userId: string;
   private personality: PersonalityType = 'default';
   private logger: Logger;
@@ -115,9 +113,6 @@ export class MiraAgent implements Agent {
   constructor(cloudUrl: string, userId: string, logger?: Logger) {
     this.userId = userId;
     this.logger = logger || _logger.child({ service: 'MiraAgent' });
-
-    // Initialize the specialized app management agent
-    this.appManagementAgent = new AppManagementAgent(cloudUrl, userId);
 
     this.agentTools = [
       new SearchToolForAgents(),
@@ -187,35 +182,19 @@ export class MiraAgent implements Agent {
    * This runs asynchronously during initialization
    */
   private async loadUserPersonality(): Promise<void> {
-    try {
-      const settings = await UserSettings.findOne({ userId: this.userId });
-      if (settings) {
-        this.personality = settings.personality;
-        this.agentPrompt = buildSystemPromptWithPersonality(this.personality);
-        console.log(`[MiraAgent] ✅ Loaded personality for user ${this.userId}: ${this.personality}`);
-        console.log(`[MiraAgent] 📝 System prompt with personality (first 500 chars):\n${this.agentPrompt.substring(0, 500)}...`);
-      } else {
-        // Use default personality if no settings found
-        this.agentPrompt = buildSystemPromptWithPersonality('default');
-        console.log(`[MiraAgent] ℹ️  No settings found for user ${this.userId}, using default personality`);
-        console.log(`[MiraAgent] 📝 System prompt with default personality (first 500 chars):\n${this.agentPrompt.substring(0, 500)}...`);
-      }
-    } catch (error) {
-      console.error('[MiraAgent] ❌ Failed to load personality:', error);
-      // Fall back to default prompt if loading fails
-      this.agentPrompt = buildSystemPromptWithPersonality('default');
-      console.log(`[MiraAgent] 📝 Fallback system prompt (first 500 chars):\n${this.agentPrompt.substring(0, 500)}...`);
-    }
+    this.personality = 'default';
+    console.log(`[MiraAgent] ✅ Personality: ${this.personality}`);
   }
 
   /**
    * Add a conversation turn to history
    */
-  private addToConversationHistory(query: string, response: string): void {
+  private addToConversationHistory(query: string, response: string, hadImage?: boolean): void {
     this.conversationHistory.push({
       query,
       response,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      hadImage,
     });
     console.log(`📚 [ConversationHistory] Added turn ${this.conversationHistory.length}: "${query.substring(0, 50)}..." -> "${response.substring(0, 50)}..."`);
 
