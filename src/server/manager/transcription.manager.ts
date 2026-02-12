@@ -188,10 +188,10 @@ export class TranscriptionManager {
 
     // Handle follow-up mode: no wake word required, just process the transcription
     if (this.isInFollowUpMode) {
-      // Log only if debug mode is not already logging everything
-      if (!DEBUG_LOG_ALL_TRANSCRIPTIONS) {
-        console.log(`🔄 [${new Date().toISOString()}] Transcription received (follow-up): "${transcriptionData.text}" (isFinal: ${transcriptionData.isFinal})`);
-      }
+      // Per-transcription follow-up logs commented out to reduce noise
+      // if (!DEBUG_LOG_ALL_TRANSCRIPTIONS) {
+      //   console.log(`🔄 [${new Date().toISOString()}] Transcription received (follow-up): "${transcriptionData.text}" (isFinal: ${transcriptionData.isFinal})`);
+      // }
       await this.handleFollowUpTranscription(transcriptionData);
       return;
     }
@@ -218,10 +218,10 @@ export class TranscriptionManager {
         console.log(`🎤 [${new Date().toISOString()}] Wake word detected: "${transcriptionData.text}" (isFinal: ${transcriptionData.isFinal})`);
       }
     } else {
-      // Log when actively listening to a query (unless debug mode already logged it)
-      if (!DEBUG_LOG_ALL_TRANSCRIPTIONS) {
-        console.log(`🎤 [${new Date().toISOString()}] Transcription received (listening): "${transcriptionData.text}" (isFinal: ${transcriptionData.isFinal})`);
-      }
+      // Per-transcription listening logs commented out to reduce noise
+      // if (!DEBUG_LOG_ALL_TRANSCRIPTIONS) {
+      //   console.log(`🎤 [${new Date().toISOString()}] Transcription received (listening): "${transcriptionData.text}" (isFinal: ${transcriptionData.isFinal})`);
+      // }
     }
 
     if (!this.isListeningToQuery) {
@@ -238,10 +238,8 @@ export class TranscriptionManager {
       this.maxListeningTimeoutId = setTimeout(() => {
         // Only fire if we're still in listening state (not already processing or reset)
         if (!this.isListeningToQuery || this.isProcessingQuery) {
-          console.log(`[Session ${this.sessionId}]: Maximum listening timer fired but state already changed (listening=${this.isListeningToQuery}, processing=${this.isProcessingQuery}) - skipping`);
           return;
         }
-        console.log(`[Session ${this.sessionId}]: Maximum listening time (15s) reached, forcing query processing`);
         if (this.timeoutId) {
           clearTimeout(this.timeoutId);
           this.timeoutId = undefined;
@@ -255,15 +253,13 @@ export class TranscriptionManager {
     // Lock onto the speaker who said the wake word
     this.activeSpeakerId = transcriptionData.speakerId;
     if (this.activeSpeakerId) {
-      console.log(`🔒 [DEBUG] Locked to speaker: ${this.activeSpeakerId}`);
+      // console.log(`🔒 [DEBUG] Locked to speaker: ${this.activeSpeakerId}`);
     }
 
     // If this is our first detection, start the transcription timer
     if (this.transcriptionStartTime === 0) {
       this.transcriptionStartTime = Date.now();
       console.log(`⏱️  [${new Date().toISOString()}] 🎙️ Started new transcription session at timestamp: ${this.transcriptionStartTime}`);
-    } else {
-      console.log(`⏱️  [${new Date().toISOString()}] 🔄 Continuing transcription session from timestamp: ${this.transcriptionStartTime}`);
     }
 
     // Remove wake word for display
@@ -389,7 +385,7 @@ export class TranscriptionManager {
       this.cancelFollowUpMode();
     }, 5000);
 
-    console.log(`🔔 [${new Date().toISOString()}] Follow-up mode activated`);
+    // console.log(`🔔 [${new Date().toISOString()}] Follow-up mode activated`);
   }
 
   /**
@@ -397,7 +393,7 @@ export class TranscriptionManager {
    * Plays the cancellation sound to give user audio feedback
    */
   private cancelFollowUpMode(): void {
-    console.log(`🚫 [${new Date().toISOString()}] Cancelling follow-up mode`);
+    // console.log(`🚫 [${new Date().toISOString()}] Cancelling follow-up mode`);
 
     // Play cancellation sound for audio feedback
     this.audioManager.playCancellation();
@@ -418,7 +414,7 @@ export class TranscriptionManager {
     this.transcriptProcessor.clear();
     this.photoManager.clearPhoto();
 
-    console.log(`🔓 [${new Date().toISOString()}] Back to normal mode - waiting for wake word`);
+    // console.log(`🔓 [${new Date().toISOString()}] Back to normal mode - waiting for wake word`);
   }
 
   /**
@@ -453,7 +449,6 @@ export class TranscriptionManager {
       logger.error(error, `[Session ${this.sessionId}]: Error in processFollowUpQuery:`);
     } finally {
       // Reset state after follow-up query
-      console.log(`⏱️  [${new Date().toISOString()}] 🧹 Resetting state after follow-up query`);
       this.transcriptionStartTime = 0;
       this.isListeningToQuery = false;
       this.transcriptProcessor.clear();
@@ -474,7 +469,6 @@ export class TranscriptionManager {
         await this.startFollowUpListening();
       } else {
         this.isProcessingQuery = false;
-        console.log(`🔓 [${new Date().toISOString()}] Processing lock released - ready for next query`);
       }
     }
   }
@@ -567,7 +561,6 @@ export class TranscriptionManager {
       const settings = await UserSettings.findOne({ userId: this.userId });
       if (settings) {
         this.followUpEnabled = settings.followUpEnabled ?? false;
-        console.log(`🔔 [Session ${this.sessionId}]: Follow-up sound ${this.followUpEnabled ? 'enabled' : 'disabled'}`);
       }
       this.followUpSettingLoaded = true;
     } catch (error) {
@@ -641,7 +634,6 @@ export class TranscriptionManager {
       }
 
       // CRITICAL: Reset state IMMEDIATELY to prevent transcript accumulation
-      console.log(`⏱️  [${new Date().toISOString()}] 🧹 Resetting transcription state (transcriptionStartTime: ${this.transcriptionStartTime} -> 0)`);
       this.transcriptionStartTime = 0;
       this.isListeningToQuery = false;
       this.transcriptProcessor.clear();
@@ -664,18 +656,10 @@ export class TranscriptionManager {
       const shouldStartFollowUp = shouldEnterFollowUp && (this.followUpEnabled || hasPendingDisambiguation);
 
       if (shouldStartFollowUp) {
-        if (hasPendingDisambiguation && !this.followUpEnabled) {
-          console.log(`🔔 [${new Date().toISOString()}] Forcing follow-up mode for disambiguation response (follow-up normally disabled)`);
-        }
         await this.startFollowUpListening();
       } else {
         // Release processing lock immediately if follow-up is disabled or query was cancelled
         this.isProcessingQuery = false;
-        if (!shouldEnterFollowUp) {
-          console.log(`🔓 [${new Date().toISOString()}] Skipping follow-up mode (query was cancelled or affirmative)`);
-        } else {
-          console.log(`🔓 [${new Date().toISOString()}] Processing lock released - ready for next query`);
-        }
       }
     }
   }

@@ -72,9 +72,7 @@ export class QueryProcessor {
   async processQuery(rawText: string, timerDuration: number, transcriptionStartTime: number, activeSpeakerId?: string): Promise<boolean> {
     this.aborted = false; // Reset abort flag for this new query
     const processQueryStartTime = Date.now();
-    console.log(`\n${"█".repeat(70)}`);
-    console.log(`⏱️  [TIMESTAMP] 🚀 processQuery START: ${new Date().toISOString()}`);
-    console.log(`${"█".repeat(70)}\n`);
+    console.log(`🚀 processQuery START`);
 
     logger.debug("processQuery called");
 
@@ -87,13 +85,13 @@ export class QueryProcessor {
       durationSeconds = Math.max(1, Math.ceil(timerDuration / 1000));
     }
 
-    console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📊 Transcription duration: ${durationSeconds}s`);
+    // console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📊 Transcription duration: ${durationSeconds}s`);
 
     // Play processing sounds IMMEDIATELY so user gets instant feedback
     const stopProcessingSounds = await this.audioManager.playProcessingSounds();
 
     // Fetch transcript from backend
-    const transcriptionResponse = await this.fetchTranscript(durationSeconds, processQueryStartTime, transcriptionStartTime);
+    const transcriptionResponse = await this.fetchTranscript(durationSeconds, transcriptionStartTime);
     if (!transcriptionResponse) {
       stopProcessingSounds();
       return false;
@@ -107,20 +105,16 @@ export class QueryProcessor {
     if (activeSpeakerId && segments.length > 0) {
       const filteredSegments = segments.filter((seg: any) => seg.speakerId === activeSpeakerId);
       if (filteredSegments.length > 0) {
-        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 🔒 Filtered to speaker ${activeSpeakerId}: ${filteredSegments.length}/${segments.length} segments`);
         segments = filteredSegments;
-      } else {
-        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ⚠️ No segments found for speaker ${activeSpeakerId}, using all segments`);
       }
     }
 
     if (segments.length > 0) {
       const lastSegment = segments[segments.length - 1];
       rawCombinedText = lastSegment.text;
-      console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📊 Using LAST segment (${lastSegment.isFinal ? 'FINAL' : 'interim'}) out of ${segments.length} total`);
     }
 
-    console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📊 Raw transcript: "${rawCombinedText}"`);
+    // console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📊 Raw transcript: "${rawCombinedText}"`);
 
     // Remove wake word from query
     let query = this.wakeWordDetector.removeWakeWord(rawCombinedText);
@@ -141,14 +135,10 @@ export class QueryProcessor {
     }
 
     try {
-      console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📝 Query extracted: "${query}"`);
-
       // LAZY GEOCODING: Only fetch location data when user asks location-related questions
       const locationQueryType = getLocationQueryType(query);
       if (locationQueryType !== 'none' && this.onLocationRequest) {
-        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📍 Location query detected (${locationQueryType}) - fetching location...`);
         await this.onLocationRequest();
-        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📍 Location data fetched`);
       }
 
       // Show the query being processed
@@ -156,7 +146,6 @@ export class QueryProcessor {
 
       // Check if this is a response to a pending disambiguation (e.g., user answering "which app?")
       if (this.miraAgent.hasPendingDisambiguation()) {
-        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📋 Pending disambiguation detected - routing to MiraAgent`);
         stopProcessingSounds();
 
         if (this.chatManager && query.trim().length > 0 && !this.currentQueryMessageId) {
@@ -172,22 +161,17 @@ export class QueryProcessor {
           hasDisplay: this.session.capabilities?.hasDisplay,
         });
 
-        await this.handleAgentResponse(agentResponse, query, null, processQueryStartTime);
+        await this.handleAgentResponse(agentResponse, query, null);
         return true;
       }
 
       // ── Single-pass pipeline: get photo, route to MiraAgent ──
 
       // Try to get cached photo first (non-blocking), fall back to waiting
-      const photoStartTime = Date.now();
-      console.log(`⏱️  [+${photoStartTime - processQueryStartTime}ms] 📸 Checking for photo...`);
       let photo = await this.photoManager.getPhoto(false);
       if (!photo) {
-        // Photo not ready yet — wait up to 3s (shorter than the old 5s to avoid blocking)
-        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📸 No cached photo, waiting up to 3s...`);
         photo = await this.photoManager.getPhoto(true);
       }
-      console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ${photo ? '✅ Photo retrieved' : '⚪ No photo available'}`);
 
       // Send query to frontend
       if (this.chatManager && query.trim().length > 0 && !this.currentQueryMessageId) {
@@ -197,7 +181,6 @@ export class QueryProcessor {
 
       // Create callback for agent to wait for photo if needed (fallback)
       const getPhotoCallback = async (): Promise<PhotoData | null> => {
-        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 📸 Agent requested photo wait - calling getPhoto(true)...`);
         return await this.photoManager.getPhoto(true);
       };
 
@@ -205,36 +188,28 @@ export class QueryProcessor {
       const inputData = { query, originalQuery: query, photo, getPhotoCallback, hasDisplay };
 
       // Single agent call — MiraAgent handles everything (vision + tools + text)
-      const agentStartTime = Date.now();
-      console.log(`⏱️  [+${agentStartTime - processQueryStartTime}ms] 🤖 Routing to MiraAgent (single pass)...`);
       const agentResponse = await this.miraAgent.handleContext(inputData);
-      const agentEndTime = Date.now();
-      console.log(`⏱️  [+${agentEndTime - processQueryStartTime}ms] ✅ MiraAgent completed (took ${agentEndTime - agentStartTime}ms)`);
 
       // Stop processing sounds
       stopProcessingSounds();
 
       // If this query was aborted by a wake word interrupt, skip response delivery
       if (this.aborted) {
-        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 🚫 Query was aborted — skipping response`);
         // Play the start-listening sound so user gets feedback that interrupt worked
         this.audioManager.playStartListening().catch(() => {});
         return false;
       }
 
       // Handle response
-      await this.handleAgentResponse(agentResponse, query, photo, processQueryStartTime);
+      await this.handleAgentResponse(agentResponse, query, photo);
 
       const totalProcessTime = Date.now() - processQueryStartTime;
-      console.log(`\n${"█".repeat(70)}`);
-      console.log(`⏱️  [TIMESTAMP] 🏁 processQuery COMPLETE!`);
-      console.log(`⏱️  Total time from start to finish: ${(totalProcessTime / 1000).toFixed(2)}s (${totalProcessTime}ms)`);
-      console.log(`${"█".repeat(70)}\n`);
+      console.log(`🏁 processQuery COMPLETE (${(totalProcessTime / 1000).toFixed(2)}s)`);
 
       return true;
 
     } catch (error) {
-      console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ❌ Error in processQuery`);
+      // Error logged by logger below
       logger.error(error, `[Session ${this.sessionId}]: Error processing query:`);
       await this.audioManager.showOrSpeakText("Sorry, there was an error processing your request.");
       stopProcessingSounds();
@@ -245,22 +220,15 @@ export class QueryProcessor {
   /**
    * Fetch transcript from backend
    */
-  private async fetchTranscript(durationSeconds: number, processQueryStartTime: number, transcriptionStartTime?: number): Promise<any | null> {
+  private async fetchTranscript(durationSeconds: number, transcriptionStartTime?: number): Promise<any | null> {
     let backendUrl = `${this.serverUrl}/api/transcripts/${this.sessionId}?duration=${durationSeconds}`;
     if (transcriptionStartTime && transcriptionStartTime > 0) {
       backendUrl += `&startTime=${new Date(transcriptionStartTime).toISOString()}`;
-      console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 🕐 Filtering transcripts after timestamp: ${transcriptionStartTime} (${new Date(transcriptionStartTime).toISOString()})`);
     }
 
     try {
-      const fetchStartTime = Date.now();
-      console.log(`⏱️  [+${fetchStartTime - processQueryStartTime}ms] 🌐 Fetching transcript from: ${backendUrl}`);
-
       logger.debug(`[Session ${this.sessionId}]: Fetching transcript from: ${backendUrl}`);
       const transcriptResponse = await fetch(backendUrl);
-
-      const fetchEndTime = Date.now();
-      console.log(`⏱️  [+${fetchEndTime - processQueryStartTime}ms] ✅ Transcript fetched (took ${fetchEndTime - fetchStartTime}ms)`);
 
       logger.debug(`[Session ${this.sessionId}]: Response status: ${transcriptResponse.status}`);
 
@@ -289,7 +257,6 @@ export class QueryProcessor {
       return transcriptionResponse;
 
     } catch (fetchError) {
-      console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ❌ Error fetching transcript`);
       logger.error(fetchError, `[Session ${this.sessionId}]: Error fetching transcript:`);
       this.session.layouts.showTextWall(
         wrapText("Sorry, there was an error retrieving your transcript. Please try again.", 30),
@@ -336,7 +303,6 @@ export class QueryProcessor {
     agentResponse: any,
     query: string,
     photo: PhotoData | null,
-    processQueryStartTime: number
   ): Promise<void> {
     let finalAnswer: string;
     let needsCamera = false;
@@ -350,13 +316,18 @@ export class QueryProcessor {
       finalAnswer = agentResponse;
     }
 
-    console.log(`🎯 needsCamera flag: ${needsCamera}`);
+    // console.log(`🎯 needsCamera flag: ${needsCamera}`);
+
+    // Log query + answer summary
+    console.log(`────────────────────────────────────`);
+    console.log(`📝 Query:  "${query}"`);
+    console.log(`🤖 Answer: ${finalAnswer || '(no answer)'}`);
+    console.log(`────────────────────────────────────`);
 
     // Always update user message with photo if one was captured
     await this.updateMessageWithPhoto(needsCamera, query, photo);
 
     if (!finalAnswer) {
-      console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ⚠️  No agent response received`);
       logger.info("No insight found");
       const errorMsg = "Sorry, I couldn't find an answer to that.";
       await this.audioManager.showOrSpeakText(errorMsg);
@@ -366,7 +337,6 @@ export class QueryProcessor {
         this.chatManager.addAssistantMessage(this.userId, errorMsg);
       }
     } else if (finalAnswer === GIVE_APP_CONTROL_OF_TOOL_RESPONSE) {
-      console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 🎮 App control handed over to tool`);
       if (this.chatManager) {
         this.chatManager.setProcessing(this.userId, false);
       }
@@ -374,34 +344,18 @@ export class QueryProcessor {
       const handled = this.tryHandleSpecialEvent(finalAnswer);
 
       if (!handled) {
-        const displayStartTime = Date.now();
-        console.log(`⏱️  [+${displayStartTime - processQueryStartTime}ms] 📱 Sending response to user...`);
-
         if (this.chatManager) {
-          console.log(`\n${"=".repeat(70)}`);
-          console.log(`📱 [WEBVIEW] Sending response to webview for user: ${this.userId}`);
-          console.log(`📱 [WEBVIEW] Response: "${finalAnswer.substring(0, 100)}${finalAnswer.length > 100 ? '...' : ''}"`);
-          console.log(`${"=".repeat(70)}\n`);
           this.chatManager.setProcessing(this.userId, false);
           this.chatManager.addAssistantMessage(this.userId, finalAnswer);
         } else {
           console.warn(`⚠️  [WEBVIEW] ChatManager not available - webview won't receive response`);
         }
 
-        const responseTime = Date.now() - processQueryStartTime;
-        console.log(`\n${"=".repeat(70)}`);
-        console.log(`⏱️  [TIMESTAMP] 🎯 AI RESPONSE READY!`);
-        console.log(`⏱️  Time from query to response: ${(responseTime / 1000).toFixed(2)}s (${responseTime}ms)`);
-        console.log(`${"=".repeat(70)}\n`);
-
         await this.audioManager.showOrSpeakText(finalAnswer);
-
-        console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] ✅ Response sent and audio completed`);
 
         if (this.onConversationTurn) {
           const photoTimestamp = photo ? Date.now() : undefined;
           this.onConversationTurn(query, finalAnswer, photoTimestamp);
-          console.log(`⏱️  [+${Date.now() - processQueryStartTime}ms] 💾 Conversation turn saved to database`);
         }
       }
     }
@@ -413,39 +367,23 @@ export class QueryProcessor {
   private async updateMessageWithPhoto(_needsCamera: boolean, query: string, photo: PhotoData | null): Promise<void> {
     let finalPhoto = photo;
     if (!finalPhoto) {
-      console.log(`📱 [WEBVIEW] 🔍 Photo not passed directly - checking cache after agent processing...`);
       const cachedPhoto = this.photoManager.getCachedPhoto();
       if (cachedPhoto) {
         finalPhoto = cachedPhoto;
-        console.log(`📱 [WEBVIEW] ✅ Found photo in cache after agent processing`);
-      } else {
-        console.log(`📱 [WEBVIEW] ⚠️ No photo in cache`);
       }
     }
 
     if (this.chatManager && finalPhoto) {
-      console.log(`\n${"=".repeat(70)}`);
-      console.log(`📱 [WEBVIEW] Updating message with photo for user: ${this.userId}`);
       const photoBase64 = `data:${finalPhoto.mimeType};base64,${finalPhoto.buffer.toString('base64')}`;
-      console.log(`📱 [WEBVIEW] 📷 Including photo (${finalPhoto.mimeType}, ${finalPhoto.size} bytes) - always streaming photo to frontend`);
-      console.log(`${"=".repeat(70)}\n`);
 
       if (this.currentQueryMessageId) {
         const updated = this.chatManager.updateUserMessage(this.userId, this.currentQueryMessageId, query, photoBase64);
         if (!updated) {
-          console.warn(`📱 [WEBVIEW] ⚠️ Failed to update message ${this.currentQueryMessageId}, creating new message`);
           this.chatManager.addUserMessage(this.userId, query, photoBase64);
-        } else {
-          console.log(`📱 [WEBVIEW] ✅ Successfully updated message ${this.currentQueryMessageId} with photo`);
         }
       } else {
-        console.warn(`📱 [WEBVIEW] ⚠️ No currentQueryMessageId available, creating new message`);
         this.chatManager.addUserMessage(this.userId, query, photoBase64);
       }
-    } else if (this.chatManager && !finalPhoto) {
-      console.log(`📱 [WEBVIEW] ℹ️ No photo available for this query`);
-    } else if (!this.chatManager) {
-      console.warn(`⚠️  [WEBVIEW] ChatManager not available - webview won't receive updates`);
     }
   }
 
