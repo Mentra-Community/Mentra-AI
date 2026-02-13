@@ -69,6 +69,7 @@ class MiraServer extends AppServer {
   private chatManager: ChatManager;
   private transcriptionSSEManager = new SSEManager(); // Manages transcription SSE connections
   private dbAPI: DatabaseAPI; // Database API for user settings
+  private welcomeTimers = new Map<string, ReturnType<typeof setTimeout>>(); // Track welcome audio timers per session
 
   constructor(options: any) {
     super(options);
@@ -231,11 +232,13 @@ class MiraServer extends AppServer {
       // Camera-only glasses: play welcome audio file after a short delay
       const welcomeSoundUrl = process.env.WELCOME_SOUND_URL;
       if (welcomeSoundUrl) {
-        setTimeout(() => {
+        const timerId = setTimeout(() => {
+          this.welcomeTimers.delete(sessionId);
           session.audio.playAudio({ audioUrl: welcomeSoundUrl }).catch((err) => {
             logger.debug('Welcome audio failed:', err);
           });
-        }, 1250);
+        }, 2000);
+        this.welcomeTimers.set(sessionId, timerId);
       }
     }
 
@@ -305,6 +308,14 @@ class MiraServer extends AppServer {
   // Handle session disconnection
   protected onStop(sessionId: string, userId: string, reason: string): Promise<void> {
     logger.info(`Stopping Mira service for session ${sessionId}, user ${userId}`);
+
+    // Cancel pending welcome audio timer to avoid playing on a dead session
+    const welcomeTimer = this.welcomeTimers.get(sessionId);
+    if (welcomeTimer) {
+      clearTimeout(welcomeTimer);
+      this.welcomeTimers.delete(sessionId);
+      logger.info(`Cancelled pending welcome audio for session ${sessionId}`);
+    }
 
     // Clean up transcription manager
     const manager = this.transcriptionManagers.get(sessionId);
