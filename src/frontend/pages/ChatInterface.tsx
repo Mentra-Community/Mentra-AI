@@ -160,6 +160,10 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
   ];
 
   const [messages, setMessages] = useState<Message[]>([]);
+  // Track whether this session has already connected before (skip intro on page reopen)
+  const [hasConnectedBefore] = useState(() => {
+    return sessionStorage.getItem('mentra-session-connected') === 'true';
+  });
   const [isProcessing, setIsProcessing] = useState(false);
   const [thinkingWord, setThinkingWord] = useState(() =>
     thinkingWords[Math.floor(Math.random() * thinkingWords.length)]
@@ -190,14 +194,14 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
 
 
   // Scroll to bottom of messages
-  const scrollToBottom = () => {
+  const scrollToBottom = (instant?: boolean) => {
     setTimeout(() => {
       const container = messagesEndRef.current?.parentElement?.parentElement?.parentElement;
       if (container && messagesEndRef.current) {
         const targetPosition = messagesEndRef.current.offsetTop + 150;
-        container.scrollTo({ top: targetPosition, behavior: 'smooth' });
+        container.scrollTo({ top: targetPosition, behavior: instant ? 'instant' : 'smooth' });
       }
-    }, 100);
+    }, instant ? 0 : 100);
   };
 
   // Get today's date in YYYY-MM-DD format
@@ -257,8 +261,15 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
     loadConversation(date);
   };
 
+  const hasScrolledOnReconnect = useRef(false);
   useEffect(() => {
-    scrollToBottom();
+    // On reconnect, scroll instantly the first time messages load
+    if (hasConnectedBefore && !hasScrolledOnReconnect.current && messages.length > 0) {
+      hasScrolledOnReconnect.current = true;
+      scrollToBottom(true);
+    } else {
+      scrollToBottom();
+    }
   }, [messages]);
 
   // Scroll to bottom when returning to chat page with messages
@@ -322,6 +333,7 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
 
     eventSource.onopen = () => {
       console.log('[ChatInterface] ✅ SSE connected successfully!');
+      sessionStorage.setItem('mentra-session-connected', 'true');
     };
 
     eventSource.onmessage = (event) => {
@@ -517,9 +529,9 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
                 <MiraBackgroundAnimation />
               </div>
 
-          {/* Welcome Screen - Shows centered when no messages or loading */}
+          {/* Welcome Screen - Shows centered when no messages AND first time connecting */}
           <AnimatePresence mode="wait">
-            {(messages.length === 0 || isLoadingConversation) && (
+            {((messages.length === 0 && !hasConnectedBefore) || isLoadingConversation) && (
               <motion.div
                 key="welcome-screen"
                 initial={{ opacity: 0 }}
@@ -587,12 +599,12 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
             )}
           </AnimatePresence>
 
-          {/* Chat Messages - Fades in when messages appear */}
-          {messages.length > 0 && !isLoadingConversation && (
+          {/* Chat Messages - Fades in when messages appear, or shows immediately on reconnect */}
+          {(messages.length > 0 || hasConnectedBefore) && !isLoadingConversation && (
             <motion.div
-              initial={{ opacity: 0, y: 20 }}
+              initial={hasConnectedBefore ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, ease: 'easeOut' }}
+              transition={{ duration: hasConnectedBefore ? 0 : 0.5, ease: 'easeOut' }}
               className="px-[24px] py-6 pb-[150px] relative z-20"
             >
               <div className="max-w-3xl mx-auto space-y-6">

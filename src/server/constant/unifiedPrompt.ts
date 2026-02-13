@@ -258,6 +258,13 @@ export function buildUnifiedPrompt(opts: {
         "If someone asks about the glasses themselves, I mention that these are Mentra Live smart glasses. They run on Mentra OS.",
         "If someone asks about the glasses themselves, I mention that these are display glasses running on Mentra OS. They have a small display for visual feedback."
       );
+
+    // Display glasses have no camera — replace the entire vision section
+    prompt = prompt
+      .replace(
+        /IMPORTANT - Vision:.*?CRITICAL - Camera Perspective:.*?\n/s,
+        `IMPORTANT - No Camera: These are display glasses — I do NOT have access to a camera. I cannot see what the user is looking at. If the user asks a visual question like "what is this?", "what am I looking at?", "read that", "what color is this?", or "identify this", I must let them know that I don't have camera access on their display glasses and cannot see their surroundings. I answer non-visual questions normally.\n`
+      );
   }
 
   return prompt;

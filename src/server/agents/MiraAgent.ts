@@ -1230,13 +1230,14 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
 
       // console.log("Location Context:", this.locationContext);
       let locationInfo = '';
-      if (this.locationContext.city !== 'Unknown' || this.locationContext.streetAddress || this.locationContext.neighborhood) {
+      if (this.locationContext.city !== 'Unknown' || this.locationContext.streetAddress || this.locationContext.neighborhood || (this.locationContext.lat && this.locationContext.lng)) {
         const locationParts = [];
         if (this.locationContext.streetAddress) locationParts.push(`on ${this.locationContext.streetAddress}`);
         if (this.locationContext.neighborhood) locationParts.push(`in the ${this.locationContext.neighborhood} area`);
         if (this.locationContext.city !== 'Unknown') locationParts.push(`in ${this.locationContext.city}, ${this.locationContext.state}, ${this.locationContext.country}`);
+        if (this.locationContext.lat && this.locationContext.lng) locationParts.push(`(coordinates: ${this.locationContext.lat}, ${this.locationContext.lng})`);
         if (this.locationContext.timezone.name !== 'Unknown') locationParts.push(`timezone: ${this.locationContext.timezone.name} (${this.locationContext.timezone.shortName})`);
-        if (locationParts.length > 0) locationInfo = `For context the User is currently ${locationParts.join(', ')}.\n\n`;
+        if (locationParts.length > 0) locationInfo = `For context the User is currently ${locationParts.join(', ')}. If the user asks for their address or location, tell them the exact neighborhood and city they are in (e.g. "You're in the Hayes Valley area in San Francisco"). Do not guess a specific street address. Do not say you cannot determine their location.\n\n`;
         if (this.locationContext.weather) {
           const weather = this.locationContext.weather;
           let weatherInfo = `Current weather: ${weather.temperature}°F (${weather.temperatureCelsius}°C), ${weather.condition}`;

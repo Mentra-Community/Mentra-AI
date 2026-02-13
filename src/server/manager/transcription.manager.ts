@@ -275,10 +275,10 @@ export class TranscriptionManager {
         this.logger.debug("transcriptionData.isFinal: ends with wake word");
         timerDuration = 10000;
       } else {
-        timerDuration = 900;
+        timerDuration = 1500;
       }
     } else {
-      timerDuration = 900;
+      timerDuration = 1500;
     }
 
     // Clear any existing timeout
@@ -339,9 +339,9 @@ export class TranscriptionManager {
     // Set timer to process the follow-up query
     let timerDuration: number;
     if (transcriptionData.isFinal) {
-      timerDuration = 900;
+      timerDuration = 1500;
     } else {
-      timerDuration = 900;
+      timerDuration = 1500;
     }
 
     // Clear any existing timeout
