@@ -1,7 +1,7 @@
 import { logger as _logger } from '@mentra/sdk';
 import type { Logger } from 'pino';
-import { reverseGeocode, getTimezone } from '../utils/map.util';
-import { getWeather, WeatherCondition } from '../utils/weather.util';
+import { reverseGeocode, getTimezone } from '../utils/geocoding-utils/map.util';
+import { getWeather, WeatherCondition } from '../utils/geocoding-utils/weather.util';
 
 const logger = _logger.child({ service: 'LocationService' });
 

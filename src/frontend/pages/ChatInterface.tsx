@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, memo } from 'react';
 import { Sparkles, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import Lottie from 'lottie-react';
+import Markdown from 'react-markdown';
 import MentraLogoAnimation from '../../public/figma-parth-assets/anim/Mentralogo2.json';
 import MiraBackground from '../../public/figma-parth-assets/anim/Mira-Background.json';
 import { MiraBackgroundAnimation } from '../components/MiraBackgroundAnimation';
@@ -51,6 +52,92 @@ interface ChatInterfaceProps {
 }
 
 /**
+ * Memoized message bubble — only re-renders when its own props change,
+ * so adding an image to one message doesn't re-render the whole list.
+ */
+const ChatBubble = memo(function ChatBubble({
+  message,
+  isOwnMessage,
+  index,
+}: {
+  message: Message;
+  isOwnMessage: boolean;
+  index: number;
+}) {
+  return (
+    <motion.div
+      key={message.id}
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3, delay: index * 0.05 }}
+      className={`flex flex-col gap-2 ${isOwnMessage ? 'items-end' : 'items-start'}`}
+    >
+      {/* Avatar and Name */}
+      <div className={`flex items-center gap-2 ${isOwnMessage ? 'flex-row-reverse' : 'flex-row'}`}>
+        <div className=" ml-[8px]">
+          {!isOwnMessage && (
+            <img src={ColorMiraLogo} alt="Shield" className="w-[40px] h-[40px]" />
+          )}
+        </div>
+      </div>
+
+      {/* Message Content */}
+      <div className={`flex flex-col ${isOwnMessage ? 'items-end' : 'items-start'}`}>
+        {message.image && (
+          <div className="mb-2">
+            <img
+              src={message.image}
+              alt="Message context"
+              className="rounded-[8px] max-w-xs h-auto cursor-zoom-in hover:opacity-90 transition-opacity "
+              style={{ maxWidth: '200px' }}
+            />
+          </div>
+        )}
+        <div className={` text-[var(--foreground)] leading-relaxed whitespace-pre-line pt-[8px] pb-[8px] pr-[16px] pl-[16px] rounded-[16px] inline-block max-w-[85vw] sm:max-w-lg text-[16px]  ${
+          isOwnMessage
+            ? 'bg-[var(--primary-foreground)] font-medium text-[var(--secondary-foreground:)]'
+            : 'bg-transparent pl-0 font-medium *:text-[var(--secondary-foreground:)]'
+        }`} style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+          {isOwnMessage ? (
+            message.content
+          ) : (
+            <Markdown
+              components={{
+                p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                strong: ({ children }) => <strong className="font-bold">{children}</strong>,
+                em: ({ children }) => <em className="italic">{children}</em>,
+                ul: ({ children }) => <ul className="list-disc pl-4 mb-2">{children}</ul>,
+                ol: ({ children }) => <ol className="list-decimal pl-4 mb-2">{children}</ol>,
+                li: ({ children }) => <li className="mb-1">{children}</li>,
+                code: ({ children, className }) => {
+                  const isBlock = className?.includes('language-');
+                  return isBlock ? (
+                    <pre className="bg-[var(--primary-foreground)] rounded-lg p-3 my-2 overflow-x-auto">
+                      <code className="text-[14px] font-mono">{children}</code>
+                    </pre>
+                  ) : (
+                    <code className="bg-[var(--primary-foreground)] rounded px-1.5 py-0.5 text-[14px] font-mono">{children}</code>
+                  );
+                },
+                h1: ({ children }) => <h1 className="text-xl font-bold mb-2">{children}</h1>,
+                h2: ({ children }) => <h2 className="text-lg font-bold mb-2">{children}</h2>,
+                h3: ({ children }) => <h3 className="text-base font-bold mb-1">{children}</h3>,
+                blockquote: ({ children }) => <blockquote className="border-l-2 border-gray-400 pl-3 italic my-2">{children}</blockquote>,
+              }}
+            >
+              {message.content}
+            </Markdown>
+          )}
+        </div>
+        <div className={`text-[12px] ml-[15px] mt-1.5 ${isOwnMessage ? 'text-right' : 'text-left'} w-full text-gray-400`}>
+          {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        </div>
+      </div>
+    </motion.div>
+  );
+});
+
+/**
  * ChatInterface component - Beautiful dark-themed chat UI
  * Shows messages between the current user and Mira assistant
  * Messages are stored in memory and broadcast in real-time
@@ -73,6 +160,10 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
   ];
 
   const [messages, setMessages] = useState<Message[]>([]);
+  // Track whether this session has already connected before (skip intro on page reopen)
+  const [hasConnectedBefore] = useState(() => {
+    return sessionStorage.getItem('mentra-session-connected') === 'true';
+  });
   const [isProcessing, setIsProcessing] = useState(false);
   const [thinkingWord, setThinkingWord] = useState(() =>
     thinkingWords[Math.floor(Math.random() * thinkingWords.length)]
@@ -103,14 +194,14 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
 
 
   // Scroll to bottom of messages
-  const scrollToBottom = () => {
+  const scrollToBottom = (instant?: boolean) => {
     setTimeout(() => {
       const container = messagesEndRef.current?.parentElement?.parentElement?.parentElement;
       if (container && messagesEndRef.current) {
         const targetPosition = messagesEndRef.current.offsetTop + 150;
-        container.scrollTo({ top: targetPosition, behavior: 'smooth' });
+        container.scrollTo({ top: targetPosition, behavior: instant ? 'instant' : 'smooth' });
       }
-    }, 100);
+    }, instant ? 0 : 100);
   };
 
   // Get today's date in YYYY-MM-DD format
@@ -170,8 +261,15 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
     loadConversation(date);
   };
 
+  const hasScrolledOnReconnect = useRef(false);
   useEffect(() => {
-    scrollToBottom();
+    // On reconnect, scroll instantly the first time messages load
+    if (hasConnectedBefore && !hasScrolledOnReconnect.current && messages.length > 0) {
+      hasScrolledOnReconnect.current = true;
+      scrollToBottom(true);
+    } else {
+      scrollToBottom();
+    }
   }, [messages]);
 
   // Scroll to bottom when returning to chat page with messages
@@ -235,6 +333,7 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
 
     eventSource.onopen = () => {
       console.log('[ChatInterface] ✅ SSE connected successfully!');
+      sessionStorage.setItem('mentra-session-connected', 'true');
     };
 
     eventSource.onmessage = (event) => {
@@ -430,9 +529,9 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
                 <MiraBackgroundAnimation />
               </div>
 
-          {/* Welcome Screen - Shows centered when no messages or loading */}
+          {/* Welcome Screen - Shows centered when no messages AND first time connecting */}
           <AnimatePresence mode="wait">
-            {(messages.length === 0 || isLoadingConversation) && (
+            {((messages.length === 0 && !hasConnectedBefore) || isLoadingConversation) && (
               <motion.div
                 key="welcome-screen"
                 initial={{ opacity: 0 }}
@@ -500,64 +599,23 @@ function ChatInterface({ userId, recipientId }: ChatInterfaceProps): React.JSX.E
             )}
           </AnimatePresence>
 
-          {/* Chat Messages - Fades in when messages appear */}
-          {messages.length > 0 && !isLoadingConversation && (
+          {/* Chat Messages - Fades in when messages appear, or shows immediately on reconnect */}
+          {(messages.length > 0 || hasConnectedBefore) && !isLoadingConversation && (
             <motion.div
-              initial={{ opacity: 0, y: 20 }}
+              initial={hasConnectedBefore ? { opacity: 1, y: 0 } : { opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, ease: 'easeOut' }}
+              transition={{ duration: hasConnectedBefore ? 0 : 0.5, ease: 'easeOut' }}
               className="px-[24px] py-6 pb-[150px] relative z-20"
             >
               <div className="max-w-3xl mx-auto space-y-6">
-                {messages.map((message, index) => {
-                  const isOwnMessage = message.senderId === userId;
-                  return (
-                    <motion.div
-                      key={message.id}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ duration: 0.3, delay: index * 0.05 }}
-                      className={`flex flex-col gap-2 ${isOwnMessage ? 'items-end' : 'items-start'}`}
-                    >
-                      {/* Avatar and Name */}
-                      <div className={`flex items-center gap-2 ${isOwnMessage ? 'flex-row-reverse' : 'flex-row'}`}>
-                        <div className=" ml-[8px]">
-
-                          {!isOwnMessage && (
-                            <img src={ColorMiraLogo} alt="Shield" className="w-[40px] h-[40px]" />
-
-                            )}
-                        </div>
-                          
-                      </div>
-
-                      {/* Message Content */}
-                      <div className={`flex flex-col ${isOwnMessage ? 'items-end' : 'items-start'}`}>
-                        {message.image && (
-                          <div className="mb-2">
-                            <img
-                              src={message.image}
-                              alt="Message context"
-                              className="rounded-[8px] max-w-xs h-auto cursor-zoom-in hover:opacity-90 transition-opacity "
-                              style={{ maxWidth: '200px' }}
-                              // onClick={() => setZoomedImage(message.image!)}
-                            />
-                          </div>
-                        )}
-                       <div className={` text-[var(--foreground)] leading-relaxed whitespace-pre-line pt-[8px] pb-[8px] pr-[16px] pl-[16px] rounded-[16px] inline-block max-w-[85vw] sm:max-w-lg text-[16px]  ${
-                          isOwnMessage
-                            ? 'bg-[var(--primary-foreground)] font-medium text-[var(--secondary-foreground:)]'
-                            : 'bg-transparent pl-0 font-medium *:text-[var(--secondary-foreground:)]'
-                        }`} style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
-                          {message.content}
-                        </div>
-                        <div className={`text-[12px] ml-[15px] mt-1.5 ${isOwnMessage ? 'text-right' : 'text-left'} w-full text-gray-400`}>
-                          {new Date(message.timestamp).toLocaleTimeString()}
-                        </div>
-                      </div>
-                    </motion.div>
-                  );
-                })}
+                {messages.map((message, index) => (
+                  <ChatBubble
+                    key={message.id}
+                    message={message}
+                    isOwnMessage={message.senderId === userId}
+                    index={index}
+                  />
+                ))}
 
                 {/* Processing Indicator */}
                 {isProcessing && (

@@ -62,10 +62,7 @@ export class ChatManager {
    * Register a WebSocket connection for a user
    */
   registerWebSocket(userId: string, ws: WebSocket): void {
-    console.log(`[ChatManager] 🔌 Registering WebSocket for user: ${userId}`);
-
     if (!this.userConnections.has(userId)) {
-      console.log(`[ChatManager] Creating new connection data for user: ${userId}`);
       this.userConnections.set(userId, {
         ws: new Set(),
         sse: new Set()
@@ -74,13 +71,9 @@ export class ChatManager {
 
     const userData = this.userConnections.get(userId)!;
     userData.ws.add(ws);
-    console.log(`[ChatManager] WebSocket added. Total connections for ${userId}:`, userData.ws.size);
 
-    // Handle WebSocket close
     ws.on('close', () => {
-      console.log(`[ChatManager] 🔌 WebSocket closed for user: ${userId}`);
       userData.ws.delete(ws);
-      console.log(`[ChatManager] Remaining connections for ${userId}:`, userData.ws.size);
     });
   }
 
@@ -126,8 +119,6 @@ export class ChatManager {
     const conversationData = this.conversations.get(conversationId)!;
     conversationData.messages.push(message);
 
-    console.log(`[ChatManager] 💾 Message stored in conversation ${conversationId}. Total messages: ${conversationData.messages.length}`);
-
     // Broadcast to both sender and recipient
     this.broadcastMessage(senderId, message);
     this.broadcastMessage(recipientId, message);
@@ -139,7 +130,6 @@ export class ChatManager {
   private broadcastMessage(userId: string, message: ChatMessage, isUpdate: boolean = false): void {
     const userData = this.userConnections.get(userId);
     if (!userData) {
-      console.log(`[ChatManager] ⚠️ No connections for user ${userId}, message not broadcasted`);
       return;
     }
 
@@ -154,12 +144,9 @@ export class ChatManager {
       image: message.image
     });
 
-    console.log(`[ChatManager] 📡 Broadcasting ${isUpdate ? 'UPDATE' : 'NEW'} to ${userId}: ${userData.ws.size} WS + ${userData.sse.size} SSE connections`);
-
     userData.ws.forEach((ws: WebSocket) => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(messageData);
-        console.log(`[ChatManager] ✅ Sent via WebSocket to ${userId}`);
       }
     });
 
@@ -168,7 +155,6 @@ export class ChatManager {
     userData.sse.forEach((res: Response) => {
       try {
         res.write(sseData);
-        console.log(`[ChatManager] ✅ Sent via SSE to ${userId}`);
       } catch (error) {
         console.error('[ChatManager] Error writing to SSE:', error);
       }
@@ -210,13 +196,7 @@ export class ChatManager {
    * Send a message from one user to another
    */
   sendUserMessage(senderId: string, recipientId: string, content: string, image?: string): void {
-    console.log(`[ChatManager] 📤 Sending message from ${senderId} to ${recipientId}`);
-    if (image) {
-      console.log(`[ChatManager] 📷 Message includes image`);
-    }
-
     this.addMessage(senderId, recipientId, content, image);
-    console.log(`[ChatManager] ✅ Message sent and broadcasted`);
   }
 
   /**
@@ -224,7 +204,6 @@ export class ChatManager {
    * Returns the message ID for potential updates
    */
   addUserMessage(userId: string, content: string, image?: string): string {
-    console.log(`[ChatManager] 👤 Adding user message for ${userId}:`, content.substring(0, 50) + '...');
     const aiRecipientId = 'mira-assistant';
     const conversationId = this.getConversationId(userId, aiRecipientId);
 
@@ -246,13 +225,10 @@ export class ChatManager {
     const conversationData = this.conversations.get(conversationId)!;
     conversationData.messages.push(message);
 
-    console.log(`[ChatManager] 💾 Message stored in conversation ${conversationId}. Total messages: ${conversationData.messages.length}`);
-
     // Broadcast to both sender and recipient
     this.broadcastMessage(userId, message);
     this.broadcastMessage(aiRecipientId, message);
 
-    console.log(`[ChatManager] ✅ User message added and broadcasted with ID: ${message.id}`);
     return message.id;
   }
 
@@ -260,7 +236,6 @@ export class ChatManager {
    * Update an existing user message (e.g., to add a photo after initial send)
    */
   updateUserMessage(userId: string, messageId: string, content: string, image?: string): boolean {
-    console.log(`[ChatManager] 🔄 Updating message ${messageId} for ${userId}`);
     const aiRecipientId = 'mira-assistant';
     const conversationId = this.getConversationId(userId, aiRecipientId);
 
@@ -285,7 +260,6 @@ export class ChatManager {
     };
 
     const updatedMessage = conversationData.messages[messageIndex];
-    console.log(`[ChatManager] ✅ Message ${messageId} updated successfully`);
 
     // Broadcast the updated message with isUpdate flag
     this.broadcastMessage(userId, updatedMessage, true);
@@ -298,45 +272,33 @@ export class ChatManager {
    * Add an assistant message (Mira's response) to the chat
    */
   addAssistantMessage(userId: string, content: string): void {
-    console.log(`[ChatManager] 🤖 Adding assistant message for ${userId}:`, content.substring(0, 50) + '...');
     const aiSenderId = 'mira-assistant';
     this.addMessage(aiSenderId, userId, content);
-    console.log(`[ChatManager] ✅ Assistant message added and broadcasted`);
   }
 
   /**
    * Set processing state to show/hide loading indicator
    */
   setProcessing(userId: string, isProcessing: boolean): void {
-    console.log(`[ChatManager] 🔄 Setting processing state for ${userId}:`, isProcessing);
     const userData = this.userConnections.get(userId);
     if (!userData) {
-      console.warn(`[ChatManager] ⚠️ No userData found for ${userId}`);
       return;
     }
-
-    console.log(`[ChatManager] Broadcasting to ${userData.ws.size} WS + ${userData.sse.size} SSE connections`);
 
     const processingData = JSON.stringify({
       type: isProcessing ? 'processing' : 'idle'
     });
 
-    // Broadcast to WebSocket
     userData.ws.forEach((ws: WebSocket) => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(processingData);
-        console.log(`[ChatManager] 📤 Sent processing state to WS:`, processingData);
-      } else {
-        console.warn(`[ChatManager] ⚠️ WebSocket not open, state:`, ws.readyState);
       }
     });
 
-    // Broadcast to SSE
     const sseData = `data: ${processingData}\n\n`;
     userData.sse.forEach((res: Response) => {
       try {
         res.write(sseData);
-        console.log(`[ChatManager] 📤 Sent processing state to SSE:`, processingData);
       } catch (error) {
         console.error('[ChatManager] Error writing processing state to SSE:', error);
       }
@@ -347,10 +309,7 @@ export class ChatManager {
    * Register an SSE connection for a user
    */
   registerSSE(userId: string, res: Response): void {
-    console.log(`[ChatManager] 📡 Registering SSE for user: ${userId}`);
-
     if (!this.userConnections.has(userId)) {
-      console.log(`[ChatManager] Creating new connection data for user: ${userId}`);
       this.userConnections.set(userId, {
         ws: new Set(),
         sse: new Set()
@@ -359,7 +318,6 @@ export class ChatManager {
 
     const userData = this.userConnections.get(userId)!;
     userData.sse.add(res);
-    console.log(`[ChatManager] SSE added. Total SSE connections for ${userId}:`, userData.sse.size);
   }
 
   /**
@@ -369,7 +327,6 @@ export class ChatManager {
     const userData = this.userConnections.get(userId);
     if (userData) {
       userData.sse.delete(res);
-      console.log(`[ChatManager] SSE removed. Remaining SSE connections for ${userId}:`, userData.sse.size);
     }
   }
 
@@ -388,30 +345,22 @@ export class ChatManager {
    * Clean up user data when they disconnect (clear messages and remove connections)
    */
   cleanupUserOnDisconnect(userId: string): void {
-    console.log(`[ChatManager] 🧹 Cleaning up data for disconnected user: ${userId}`);
-
-    // Clear all conversations involving this user
     const aiRecipientId = 'mira-assistant';
     const conversationId = this.getConversationId(userId, aiRecipientId);
 
-    // Clear the conversation messages
     if (this.conversations.has(conversationId)) {
       this.conversations.delete(conversationId);
-      console.log(`[ChatManager] 🗑️ Deleted conversation: ${conversationId}`);
     }
 
-    // Remove user connections
     if (this.userConnections.has(userId)) {
       const userData = this.userConnections.get(userId)!;
 
-      // Close all WebSocket connections
       userData.ws.forEach(ws => {
         if (ws.readyState === WebSocket.OPEN) {
           ws.close();
         }
       });
 
-      // Close all SSE connections
       userData.sse.forEach(res => {
         try {
           res.end();
@@ -421,15 +370,10 @@ export class ChatManager {
       });
 
       this.userConnections.delete(userId);
-      console.log(`[ChatManager] 🗑️ Removed all connections for user: ${userId}`);
     }
 
-    // Clean up the agent for this user
     if (this.agents.has(userId)) {
       this.agents.delete(userId);
-      console.log(`[ChatManager] 🗑️ Removed agent for user: ${userId}`);
     }
-
-    console.log(`[ChatManager] ✅ Cleanup complete for user: ${userId}`);
   }
 }

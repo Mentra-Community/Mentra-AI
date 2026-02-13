@@ -10,6 +10,7 @@ const LOCATION_KEYWORDS = [
   // Direct location questions
   'where am i',
   'my location',
+  'location',
   'my address',
   'current location',
   'my current address',

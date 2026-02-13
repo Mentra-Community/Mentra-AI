@@ -3,10 +3,10 @@ import { wrapText } from '../utils';
 
 const logger = _logger.child({ service: 'AudioPlaybackManager' });
 
-const PROCESSING_SOUND_URL = process.env.PROCESSING_SOUND_URL;
-const START_LISTENING_SOUND_URL = process.env.START_LISTENING_SOUND_URL;
-const CANCEL_MIRA_SOUND_URL = process.env.CANCEL_MIRA_SOUND_URL;
-const FOLLOW_UP_SOUND_URL = process.env.FOLLOW_UP_SOUND_URL;
+const PROCESSING_SOUND_URL = process.env.PROCESSING_SOUND_URL || '';
+const START_LISTENING_SOUND_URL = process.env.START_LISTENING_SOUND_URL || '';
+const CANCEL_MIRA_SOUND_URL = process.env.CANCEL_MIRA_SOUND_URL || '';
+const FOLLOW_UP_SOUND_URL = process.env.FOLLOW_UP_SOUND_URL || '';
 
 /**
  * Manages audio playback and text-to-speech for the session

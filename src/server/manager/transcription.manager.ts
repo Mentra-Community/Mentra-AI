@@ -2,15 +2,15 @@ import {
   AppSession,
   logger as _logger
 } from '@mentra/sdk';
-import { MiraAgent, CameraQuestionAgent } from '../agents';
-import { TranscriptProcessor, getCancellationDecider, CancellationDecider, CancellationDecision, CancellationResult } from '../utils';
+import { MiraAgent } from '../agents';
+import { TranscriptProcessor } from '../utils';
 import { ChatManager } from './chat.manager';
 import { notificationsManager } from './notifications.manager';
 import { PhotoManager } from './photo.manager';
-import { LocationService, clearLocationCacheForSession } from './location.service';
+import { LocationService, clearLocationCacheForSession } from './geolocation.manager';
 import { AudioPlaybackManager } from './audio-playback.manager';
-import { WakeWordDetector } from './wake-word.detector';
-import { QueryProcessor } from './query.processor';
+import { WakeWordDetector } from './wake-word.manager';
+import { QueryProcessor } from './query.manager';
 import { UserSettings } from '../schemas';
 
 const logger = _logger.child({ service: 'TranscriptionManager' });
@@ -20,7 +20,7 @@ const logger = _logger.child({ service: 'TranscriptionManager' });
  * Set to true to see ALL transcriptions (including ambient) in terminal
  * Set to false to only see relevant transcriptions (wake word, follow-up, etc.)
  */
-const DEBUG_LOG_ALL_TRANSCRIPTIONS = true;
+const DEBUG_LOG_ALL_TRANSCRIPTIONS = false;
 
 /**
  * Manages the transcription state for active sessions
@@ -46,9 +46,6 @@ export class TranscriptionManager {
   private transcriptionUnsubscribe?: () => void;
   private headWindowTimeoutId?: NodeJS.Timeout;
 
-  // Clarification mode flag - prevents state reset when waiting for yes/no response
-  private isWaitingForClarification: boolean = false;
-
   // Follow-up sound setting (cached from database)
   private followUpEnabled: boolean = false;
   private followUpSettingLoaded: boolean = false;
@@ -56,8 +53,6 @@ export class TranscriptionManager {
   // Follow-up listening mode - listens for 5 seconds without wake word after query completes
   private isInFollowUpMode: boolean = false;
   private followUpTimeoutId?: NodeJS.Timeout;
-  private isEndingFollowUpGracefully: boolean = false; // Guard to prevent double execution
-
   // Track last processed query to prevent transcript accumulation bug
   // (backend doesn't properly clear/filter transcripts, so we skip text we've already processed)
   private lastProcessedQueryText: string = '';
@@ -65,14 +60,16 @@ export class TranscriptionManager {
   // Speaker lock - only listen to the person who said the wake word
   private activeSpeakerId: string | undefined = undefined;
 
+  // Generation counter — incremented on each interrupt/reset so stale processQuery
+  // finally blocks don't clobber state belonging to a newer session
+  private queryGeneration: number = 0;
+
   // Extracted managers and services
   private photoManager: PhotoManager;
   private locationService: LocationService;
   private audioManager: AudioPlaybackManager;
   private wakeWordDetector: WakeWordDetector;
   private queryProcessor: QueryProcessor;
-  private cameraQuestionAgent: CameraQuestionAgent;
-  private cancellationDecider: CancellationDecider;
 
   constructor(
     session: AppSession,
@@ -95,20 +92,16 @@ export class TranscriptionManager {
     this.locationService = new LocationService(sessionId, session.logger);
     this.audioManager = new AudioPlaybackManager(session, sessionId);
     this.wakeWordDetector = new WakeWordDetector();
-    this.cancellationDecider = getCancellationDecider();
-    this.cameraQuestionAgent = new CameraQuestionAgent(userId);
     this.queryProcessor = new QueryProcessor({
       session,
       sessionId,
       userId,
       miraAgent,
-      cameraQuestionAgent: this.cameraQuestionAgent,
       serverUrl,
       chatManager,
       photoManager: this.photoManager,
       audioManager: this.audioManager,
       wakeWordDetector: this.wakeWordDetector,
-      onRequestClarification: () => this.startClarificationListening(),
       onConversationTurn,
       // Lazy geocoding: Only fetch location when user asks location-related questions
       onLocationRequest: async () => {
@@ -160,21 +153,34 @@ export class TranscriptionManager {
       return;
     }
 
-    if (this.isProcessingQuery) {
-      this.logger.info(`[Session ${this.sessionId}]: Query already in progress. Ignoring transcription.`);
-      return;
-    }
-
     const text = transcriptionData.text;
     const cleanedText = this.wakeWordDetector.cleanText(text);
     const hasWakeWord = this.wakeWordDetector.hasWakeWord(text);
 
+    if (this.isProcessingQuery) {
+      // Ignore ALL transcriptions (including wake word) while a query is being processed.
+      // The user must wait for the current query to finish before starting a new one.
+      return;
+    }
+
+    // Ignore stale transcriptions that echo the query we just finished processing.
+    // The STT session keeps emitting text from the same utterance even after processQuery
+    // completes and resets isProcessingQuery. Without this check, the stale transcript
+    // (which still contains the wake word) would be treated as a brand-new query.
+    if (!this.isListeningToQuery && this.lastProcessedQueryText && hasWakeWord) {
+      const queryWithoutWakeWord = this.wakeWordDetector.removeWakeWord(text).trim();
+      const lastQueryWithoutWakeWord = this.wakeWordDetector.removeWakeWord(this.lastProcessedQueryText).trim();
+      if (queryWithoutWakeWord.length > 0 && lastQueryWithoutWakeWord.includes(queryWithoutWakeWord)) {
+        return;
+      }
+    }
+
     // Handle follow-up mode: no wake word required, just process the transcription
     if (this.isInFollowUpMode) {
-      // Log only if debug mode is not already logging everything
-      if (!DEBUG_LOG_ALL_TRANSCRIPTIONS) {
-        console.log(`🔄 [${new Date().toISOString()}] Transcription received (follow-up): "${transcriptionData.text}" (isFinal: ${transcriptionData.isFinal})`);
-      }
+      // Per-transcription follow-up logs commented out to reduce noise
+      // if (!DEBUG_LOG_ALL_TRANSCRIPTIONS) {
+      //   console.log(`🔄 [${new Date().toISOString()}] Transcription received (follow-up): "${transcriptionData.text}" (isFinal: ${transcriptionData.isFinal})`);
+      // }
       await this.handleFollowUpTranscription(transcriptionData);
       return;
     }
@@ -201,32 +207,19 @@ export class TranscriptionManager {
         console.log(`🎤 [${new Date().toISOString()}] Wake word detected: "${transcriptionData.text}" (isFinal: ${transcriptionData.isFinal})`);
       }
     } else {
-      // Log when actively listening to a query (unless debug mode already logged it)
-      if (!DEBUG_LOG_ALL_TRANSCRIPTIONS) {
-        console.log(`🎤 [${new Date().toISOString()}] Transcription received (listening): "${transcriptionData.text}" (isFinal: ${transcriptionData.isFinal})`);
-      }
+      // Per-transcription listening logs commented out to reduce noise
+      // if (!DEBUG_LOG_ALL_TRANSCRIPTIONS) {
+      //   console.log(`🎤 [${new Date().toISOString()}] Transcription received (listening): "${transcriptionData.text}" (isFinal: ${transcriptionData.isFinal})`);
+      // }
     }
 
     if (!this.isListeningToQuery) {
+      // New query starting — clear stale query text so future queries aren't blocked
+      this.lastProcessedQueryText = '';
+
       // Request a fresh photo ONLY when we first detect the wake word (start of query)
       // This prevents taking multiple photos during the same query
       this.photoManager.requestPhoto();
-
-      // Play start listening sound immediately (don't wait for AI cancellation check)
-      this.audioManager.playStartListening();
-
-      // Check for cancellation phrases using AI-powered detection (non-blocking)
-      // This runs in parallel with the user continuing to speak
-      const queryAfterWakeWord = this.wakeWordDetector.removeWakeWord(text).trim();
-      this.cancellationDecider.checkIfWantsToCancelAsync(queryAfterWakeWord).then(cancellationCheck => {
-        if (cancellationCheck === CancellationDecision.CANCEL && !this.isProcessingQuery) {
-          this.logger.debug("Cancellation phrase detected by AI, aborting query");
-          this.handleCancellation();
-        }
-      }).catch(error => {
-        console.error(`❌ AI cancellation check failed:`, error);
-        // On error, continue processing (don't cancel)
-      });
 
       // DISABLED: Location fetch moved to query processor (lazy geocoding)
       // Only fetch location when user asks location-related questions
@@ -235,7 +228,10 @@ export class TranscriptionManager {
 
       // Start 15-second maximum listening timer
       this.maxListeningTimeoutId = setTimeout(() => {
-        console.log(`[Session ${this.sessionId}]: Maximum listening time (15s) reached, forcing query processing`);
+        // Only fire if we're still in listening state (not already processing or reset)
+        if (!this.isListeningToQuery || this.isProcessingQuery) {
+          return;
+        }
         if (this.timeoutId) {
           clearTimeout(this.timeoutId);
           this.timeoutId = undefined;
@@ -249,15 +245,13 @@ export class TranscriptionManager {
     // Lock onto the speaker who said the wake word
     this.activeSpeakerId = transcriptionData.speakerId;
     if (this.activeSpeakerId) {
-      console.log(`🔒 [DEBUG] Locked to speaker: ${this.activeSpeakerId}`);
+      // console.log(`🔒 [DEBUG] Locked to speaker: ${this.activeSpeakerId}`);
     }
 
     // If this is our first detection, start the transcription timer
     if (this.transcriptionStartTime === 0) {
       this.transcriptionStartTime = Date.now();
       console.log(`⏱️  [${new Date().toISOString()}] 🎙️ Started new transcription session at timestamp: ${this.transcriptionStartTime}`);
-    } else {
-      console.log(`⏱️  [${new Date().toISOString()}] 🔄 Continuing transcription session from timestamp: ${this.transcriptionStartTime}`);
     }
 
     // Remove wake word for display
@@ -284,7 +278,7 @@ export class TranscriptionManager {
         timerDuration = 1500;
       }
     } else {
-      timerDuration = 2000;
+      timerDuration = 1500;
     }
 
     // Clear any existing timeout
@@ -296,20 +290,6 @@ export class TranscriptionManager {
     this.timeoutId = setTimeout(() => {
       this.processQuery(text, timerDuration);
     }, timerDuration);
-  }
-
-  /**
-   * Handle cancellation request
-   */
-  private handleCancellation(): void {
-    // Play cancellation sound
-    this.audioManager.playCancellation();
-
-    // Clear display
-    this.session.layouts.showTextWall("Cancelled", { durationMs: 2000 });
-
-    // Reset state
-    this.resetState();
   }
 
   /**
@@ -340,48 +320,13 @@ export class TranscriptionManager {
       this.followUpTimeoutId = undefined;
     }
 
-    // CRITICAL: Only check for cancellation/affirmative on FINAL transcriptions
-    // Checking on partial transcriptions (isFinal: false) causes false positives
-    // Example: "You got" (partial) → incorrectly detected as affirmative
-    //          "You got to find it" (complete) → correctly not affirmative
-    if (transcriptionData.isFinal) {
-      // Check for cancellation using AI-powered context-aware decider for follow-up mode
-      // This checks both affirmative phrases and cancellation phrases
-      const result = await this.cancellationDecider.checkIfWantsToCancelInFollowUpMode(text);
-
-      // Handle affirmative phrases (user wants to end conversation gracefully)
-      // IMPORTANT: Only end gracefully if NOT in clarification mode
-      // In clarification mode, "sure"/"yes" means "continue with task", not "end conversation"
-      if (result.isAffirmative && !this.isListeningToQuery) {
-        console.log(`✅ [${new Date().toISOString()}] Affirmative phrase detected - ending follow-up mode gracefully`);
-
-        // Cancel any pending query processing timeout
-        if (this.timeoutId) {
-          clearTimeout(this.timeoutId);
-          this.timeoutId = undefined;
-        }
-
-        // Use void to explicitly acknowledge we're not awaiting this async call
-        // The guard inside endFollowUpModeGracefully prevents concurrent executions
-        void this.endFollowUpModeGracefully();
-        return;
-      }
-
-      // Handle cancellation commands (user wants to stop immediately)
-      if (result.decision === CancellationDecision.CANCEL) {
-        console.log(`🚫 [${new Date().toISOString()}] Follow-up cancelled by user`);
-        this.cancelFollowUpMode();
-        return;
-      }
-    }
-
     // Start transcription timer if not already started
-    // Request photo ONLY at the start of a new follow-up query (not on every transcription)
+    // Do NOT request a new photo for follow-up queries — the visual context hasn't changed
+    // since the previous query (only seconds ago). This prevents the camera from firing
+    // repeatedly while the user is mid-conversation.
     if (this.transcriptionStartTime === 0) {
-      // Request a fresh photo for potential vision query
-      this.photoManager.requestPhoto();
       this.transcriptionStartTime = Date.now();
-      console.log(`⏱️  [${new Date().toISOString()}] 🎙️ Started follow-up transcription at: ${this.transcriptionStartTime}`);
+      console.log(`⏱️  [${new Date().toISOString()}] 🎙️ Started follow-up transcription at: ${this.transcriptionStartTime} (no photo — reusing context from previous query)`);
     }
 
     // Show the live query (no "Listening..." prefix for follow-up)
@@ -394,9 +339,9 @@ export class TranscriptionManager {
     // Set timer to process the follow-up query
     let timerDuration: number;
     if (transcriptionData.isFinal) {
-      timerDuration = 1500; // Shorter timeout for follow-ups
+      timerDuration = 1500;
     } else {
-      timerDuration = 2000;
+      timerDuration = 1500;
     }
 
     // Clear any existing timeout
@@ -421,7 +366,7 @@ export class TranscriptionManager {
     // Transcriptions arriving during audio playback must route to follow-up handling,
     // not wake word detection. Otherwise, ambient sound during the follow-up chime
     // can trigger false activations.
-    this.isInFollowUpMode = true;
+    this.isInFollowUpMode = false;
     this.isProcessingQuery = false;
     this.transcriptionStartTime = 0;
     this.transcriptProcessor.clear();
@@ -432,9 +377,7 @@ export class TranscriptionManager {
       this.cancelFollowUpMode();
     }, 5000);
 
-    // Play the follow-up sound (state is already set, so transcriptions route correctly)
-    await this.audioManager.playFollowUp();
-    console.log(`🔔 [${new Date().toISOString()}] Follow-up sound completed`);
+    // console.log(`🔔 [${new Date().toISOString()}] Follow-up mode activated`);
   }
 
   /**
@@ -442,7 +385,7 @@ export class TranscriptionManager {
    * Plays the cancellation sound to give user audio feedback
    */
   private cancelFollowUpMode(): void {
-    console.log(`🚫 [${new Date().toISOString()}] Cancelling follow-up mode`);
+    // console.log(`🚫 [${new Date().toISOString()}] Cancelling follow-up mode`);
 
     // Play cancellation sound for audio feedback
     this.audioManager.playCancellation();
@@ -463,61 +406,7 @@ export class TranscriptionManager {
     this.transcriptProcessor.clear();
     this.photoManager.clearPhoto();
 
-    console.log(`🔓 [${new Date().toISOString()}] Back to normal mode - waiting for wake word`);
-  }
-
-  /**
-   * End follow-up mode gracefully (user said affirmative phrase like "thank you")
-   * Plays cancellation sound to acknowledge the end of conversation
-   */
-  private async endFollowUpModeGracefully(): Promise<void> {
-    // Guard against double execution (interim + final transcriptions)
-    if (this.isEndingFollowUpGracefully) {
-      console.log(`⏭️  [${new Date().toISOString()}] Already ending follow-up gracefully, skipping duplicate call`);
-      return;
-    }
-
-    this.isEndingFollowUpGracefully = true;
-    console.log(`👋 [${new Date().toISOString()}] Ending follow-up mode gracefully (affirmative acknowledgment)`);
-
-    // CRITICAL: Exit follow-up mode IMMEDIATELY (synchronously) before async audio
-    // This prevents accepting transcriptions without wake word while audio is playing
-    this.isInFollowUpMode = false;
-    this.isProcessingQuery = false;
-
-    // Clear all timeouts immediately
-    if (this.followUpTimeoutId) {
-      clearTimeout(this.followUpTimeoutId);
-      this.followUpTimeoutId = undefined;
-    }
-    if (this.timeoutId) {
-      clearTimeout(this.timeoutId);
-      this.timeoutId = undefined;
-    }
-
-    // Clear transcription state immediately
-    this.transcriptionStartTime = 0;
-    this.transcriptProcessor.clear();
-    this.photoManager.clearPhoto();
-
-    console.log(`🔓 [${new Date().toISOString()}] Exited follow-up mode - back to normal mode (audio acknowledgment will play)`);
-
-    try {
-      // Send a friendly acknowledgment message (async, but state is already reset)
-      const acknowledgmentMessage = "I'm always here to help, just let me know.";
-
-      // Display on glasses and speak the message
-      await this.audioManager.showOrSpeakText(acknowledgmentMessage);
-
-      // Play cancellation sound to acknowledge conversation end
-      this.audioManager.playCancellation();
-    } catch (error) {
-      console.error(`❌ Error in endFollowUpModeGracefully:`, error);
-    } finally {
-      // Reset guard flag
-      this.isEndingFollowUpGracefully = false;
-      console.log(`✅ [${new Date().toISOString()}] Graceful exit complete`);
-    }
+    // console.log(`🔓 [${new Date().toISOString()}] Back to normal mode - waiting for wake word`);
   }
 
   /**
@@ -551,17 +440,7 @@ export class TranscriptionManager {
     } catch (error) {
       logger.error(error, `[Session ${this.sessionId}]: Error in processFollowUpQuery:`);
     } finally {
-      // Check if we're waiting for clarification FIRST before resetting any state
-      // If waiting for clarification, skip all state resets and don't start follow-up mode
-      if (this.isWaitingForClarification) {
-        console.log(`🔓 [${new Date().toISOString()}] Skipping state reset - waiting for clarification response`);
-        // Don't reset state or start follow-up mode, the clarification listener will handle it
-        this.isProcessingQuery = false;
-        return;
-      }
-
       // Reset state after follow-up query
-      console.log(`⏱️  [${new Date().toISOString()}] 🧹 Resetting state after follow-up query`);
       this.transcriptionStartTime = 0;
       this.isListeningToQuery = false;
       this.transcriptProcessor.clear();
@@ -582,7 +461,6 @@ export class TranscriptionManager {
         await this.startFollowUpListening();
       } else {
         this.isProcessingQuery = false;
-        console.log(`🔓 [${new Date().toISOString()}] Processing lock released - ready for next query`);
       }
     }
   }
@@ -612,57 +490,6 @@ export class TranscriptionManager {
     }
     this.transcriptProcessor.clear();
     this.queryProcessor.clearCurrentQueryMessageId();
-  }
-
-  /**
-   * Start a clarification listening session (for yes/no responses)
-   * Called when vision query decider returns UNSURE
-   */
-  private startClarificationListening(): void {
-    console.log(`🎙️ [${new Date().toISOString()}] Starting clarification listening session`);
-
-    // Clear timeouts
-    if (this.timeoutId) {
-      clearTimeout(this.timeoutId);
-      this.timeoutId = undefined;
-    }
-    if (this.maxListeningTimeoutId) {
-      clearTimeout(this.maxListeningTimeoutId);
-      this.maxListeningTimeoutId = undefined;
-    }
-    this.transcriptProcessor.clear();
-
-    // Set flag to indicate we're waiting for clarification
-    // This will be checked in processQuery finally block
-    this.isWaitingForClarification = true;
-
-    // Use setTimeout to ensure this runs AFTER the current processQuery finally block completes
-    setTimeout(() => {
-      // Play the start listening sound
-      this.audioManager.playStartListening();
-
-      // Show listening indicator
-      this.session.layouts.showTextWall("Listening for yes or no...", { durationMs: 10000 });
-
-      // Set up to listen for the next transcription (yes/no response)
-      this.isListeningToQuery = true;
-      this.isProcessingQuery = false;
-      this.transcriptionStartTime = Date.now();
-
-      console.log(`🎙️ [${new Date().toISOString()}] Clarification listening active (isListeningToQuery: ${this.isListeningToQuery})`);
-
-      // Set a 10-second timeout for clarification response
-      this.maxListeningTimeoutId = setTimeout(() => {
-        console.log(`[Session ${this.sessionId}]: Clarification timeout (10s) reached`);
-        this.isWaitingForClarification = false;
-        if (this.timeoutId) {
-          clearTimeout(this.timeoutId);
-          this.timeoutId = undefined;
-        }
-        // Process with whatever we have (or empty) - will default to "no" for camera
-        this.processQuery("no", 10000);
-      }, 10000);
-    }, 100); // Small delay to let processQuery finish first
   }
 
   /**
@@ -726,7 +553,6 @@ export class TranscriptionManager {
       const settings = await UserSettings.findOne({ userId: this.userId });
       if (settings) {
         this.followUpEnabled = settings.followUpEnabled ?? false;
-        console.log(`🔔 [Session ${this.sessionId}]: Follow-up sound ${this.followUpEnabled ? 'enabled' : 'disabled'}`);
       }
       this.followUpSettingLoaded = true;
     } catch (error) {
@@ -761,34 +587,38 @@ export class TranscriptionManager {
     }
 
     this.isProcessingQuery = true;
-    let shouldEnterFollowUp = true; // Track if we should enter follow-up mode
 
-    // Store the raw text to prevent it from being re-processed in next follow-up
-    // This is needed because backend doesn't properly clear/filter transcripts
+    // Store the raw text so the stale-transcript guard (lines 170-176) can detect
+    // echoed transcripts that arrive after this query finishes.
     this.lastProcessedQueryText = rawText;
 
+    // Capture the generation at entry — if it changes (due to interrupt), our finally block
+    // must NOT reset state because a newer session owns it now.
+    const myGeneration = this.queryGeneration;
+
+    // CRITICAL: Clear both timers IMMEDIATELY on entry to prevent the other timer
+    // from firing while we're processing (race condition between 900ms/10s timer and 15s max timer)
+    if (this.timeoutId) {
+      clearTimeout(this.timeoutId);
+      this.timeoutId = undefined;
+    }
+    if (this.maxListeningTimeoutId) {
+      clearTimeout(this.maxListeningTimeoutId);
+      this.maxListeningTimeoutId = undefined;
+    }
+
     try {
-      const result = await this.queryProcessor.processQuery(rawText, timerDuration, this.transcriptionStartTime, this.activeSpeakerId);
-      // If processQuery returns false, it means the query was cancelled or was an affirmative phrase
-      // and we should NOT enter follow-up mode
-      if (result === false) {
-        shouldEnterFollowUp = false;
-      }
+      await this.queryProcessor.processQuery(rawText, timerDuration, this.transcriptionStartTime, this.activeSpeakerId);
     } catch (error) {
       logger.error(error, `[Session ${this.sessionId}]: Error in processQuery:`);
     } finally {
-      // If waiting for clarification response, don't reset state yet
-      // but DO release the processing lock so the clarification response can be processed
-      if (this.isWaitingForClarification) {
-        console.log(`⏱️  [${new Date().toISOString()}] 🎙️ Waiting for clarification - skipping state reset but releasing lock`);
-        this.isWaitingForClarification = false; // Reset flag, startClarificationListening will handle the rest
-        this.isProcessingQuery = false; // Release lock so clarification response can be processed
+      // If generation changed, an interrupt already reset state — don't clobber it
+      if (myGeneration !== this.queryGeneration) {
+        console.log(`⏱️  [${new Date().toISOString()}] 🚫 Skipping finally cleanup — session was interrupted (gen ${myGeneration} != ${this.queryGeneration})`);
         return;
       }
 
       // CRITICAL: Reset state IMMEDIATELY to prevent transcript accumulation
-      // These must be reset synchronously before the setTimeout delay
-      console.log(`⏱️  [${new Date().toISOString()}] 🧹 Resetting transcription state (transcriptionStartTime: ${this.transcriptionStartTime} -> 0)`);
       this.transcriptionStartTime = 0;
       this.isListeningToQuery = false;
       this.transcriptProcessor.clear();
@@ -804,26 +634,8 @@ export class TranscriptionManager {
         this.maxListeningTimeoutId = undefined;
       }
 
-      // Start follow-up listening mode ONLY if query was actually processed
-      // Skip follow-up for cancellations and affirmative phrases
-      // IMPORTANT: Force follow-up mode if there's a pending disambiguation (AI asked "which app?")
-      const hasPendingDisambiguation = this.queryProcessor.hasPendingDisambiguation();
-      const shouldStartFollowUp = shouldEnterFollowUp && (this.followUpEnabled || hasPendingDisambiguation);
-
-      if (shouldStartFollowUp) {
-        if (hasPendingDisambiguation && !this.followUpEnabled) {
-          console.log(`🔔 [${new Date().toISOString()}] Forcing follow-up mode for disambiguation response (follow-up normally disabled)`);
-        }
-        await this.startFollowUpListening();
-      } else {
-        // Release processing lock immediately if follow-up is disabled or query was cancelled
-        this.isProcessingQuery = false;
-        if (!shouldEnterFollowUp) {
-          console.log(`🔓 [${new Date().toISOString()}] Skipping follow-up mode (query was cancelled or affirmative)`);
-        } else {
-          console.log(`🔓 [${new Date().toISOString()}] Processing lock released - ready for next query`);
-        }
-      }
+      // Release processing lock — back to wake word mode
+      this.isProcessingQuery = false;
     }
   }
 

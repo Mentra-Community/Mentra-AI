@@ -1,6 +1,14 @@
 // MiraAgent.ts
 
-import { Agent } from "./AgentInterface";
+export interface Agent {
+  agentId: string;
+  agentName: string;
+  agentDescription: string;
+  agentPrompt: string;
+  agentTools: any[];
+  handleContext(inputData: any): Promise<{ [key: string]: any }>;
+}
+
 import { AgentExecutor, createReactAgent } from "langchain/agents";
 import { SearchToolForAgents } from "./tools/SearchToolForAgents";
 import { PromptTemplate } from "@langchain/core/prompts";
@@ -12,28 +20,22 @@ import { Tool, StructuredTool } from "langchain/tools";
 import { TpaCommandsTool, TpaListAppsTool, TpaListAppsWithToolsTool } from "./tools/TpaCommandsTool";
 import { SmartAppControlTool } from "./tools/SmartAppControlTool";
 import { TpaToolInvokeTool } from "./tools/TpaToolInvokeTool";
-import { AppManagementAgent } from "./AppManagementAgent";
-
 import { ThinkingTool } from "./tools/ThinkingTool";
 import { Calculator } from "@langchain/community/tools/calculator";
 import { AppServer, PhotoData, GIVE_APP_CONTROL_OF_TOOL_RESPONSE, logger as _logger } from "@mentra/sdk";
 import type { Logger } from "pino";
-import { analyzeImage } from "../utils/img-processor.util";
-import * as fs from "node:fs";
-import * as path from "node:path";
-import * as os from "node:os";
 import {
-  MIRA_SYSTEM_PROMPT,
   ResponseMode,
   CAMERA_RESPONSE_CONFIGS,
   DISPLAY_RESPONSE_CONFIGS,
   MAX_CONVERSATION_HISTORY,
-  MAX_CONVERSATION_AGE_MS
-} from "../constant/prompts";
-import { UserSettings } from "../schemas";
-import { buildSystemPromptWithPersonality } from "../utils/prompt.util";
-import { PersonalityType } from "../constant/personality";
-import { getDisambiguationDetector, DisambiguationCandidate } from "../utils/disambiguation-detector";
+  MAX_CONVERSATION_AGE_MS,
+  MAX_TOOL_TURNS,
+  buildUnifiedPrompt,
+  PERSONALITY_INSTRUCTIONS,
+  PersonalityType,
+} from "../constant/unifiedPrompt";
+import { getDisambiguationDetector, DisambiguationCandidate } from "../utils/disambiguation-detector.util";
 
 interface QuestionAnswer {
     insight: string;
@@ -43,6 +45,7 @@ interface ConversationTurn {
   query: string;
   response: string;
   timestamp: number;
+  hadImage?: boolean;
 }
 
 interface PendingDisambiguation {
@@ -57,9 +60,8 @@ export class MiraAgent implements Agent {
   public agentName = "MiraAgent";
   public agentDescription =
     "Answers user queries from smart glasses using conversation context and history.";
-  public agentPrompt = MIRA_SYSTEM_PROMPT;
+  public agentPrompt = "Mentra AI - smart glasses assistant";
   public agentTools:(Tool | StructuredTool)[];
-  private appManagementAgent: AppManagementAgent;
   private userId: string;
   private personality: PersonalityType = 'default';
   private logger: Logger;
@@ -111,9 +113,6 @@ export class MiraAgent implements Agent {
   constructor(cloudUrl: string, userId: string, logger?: Logger) {
     this.userId = userId;
     this.logger = logger || _logger.child({ service: 'MiraAgent' });
-
-    // Initialize the specialized app management agent
-    this.appManagementAgent = new AppManagementAgent(cloudUrl, userId);
 
     this.agentTools = [
       new SearchToolForAgents(),
@@ -183,38 +182,20 @@ export class MiraAgent implements Agent {
    * This runs asynchronously during initialization
    */
   private async loadUserPersonality(): Promise<void> {
-    try {
-      const settings = await UserSettings.findOne({ userId: this.userId });
-      if (settings) {
-        this.personality = settings.personality;
-        this.agentPrompt = buildSystemPromptWithPersonality(this.personality);
-        console.log(`[MiraAgent] ✅ Loaded personality for user ${this.userId}: ${this.personality}`);
-        console.log(`[MiraAgent] 📝 System prompt with personality (first 500 chars):\n${this.agentPrompt.substring(0, 500)}...`);
-      } else {
-        // Use default personality if no settings found
-        this.agentPrompt = buildSystemPromptWithPersonality('default');
-        console.log(`[MiraAgent] ℹ️  No settings found for user ${this.userId}, using default personality`);
-        console.log(`[MiraAgent] 📝 System prompt with default personality (first 500 chars):\n${this.agentPrompt.substring(0, 500)}...`);
-      }
-    } catch (error) {
-      console.error('[MiraAgent] ❌ Failed to load personality:', error);
-      // Fall back to default prompt if loading fails
-      this.agentPrompt = buildSystemPromptWithPersonality('default');
-      console.log(`[MiraAgent] 📝 Fallback system prompt (first 500 chars):\n${this.agentPrompt.substring(0, 500)}...`);
-    }
+    this.personality = 'default';
+    console.log(`[MiraAgent] ✅ Personality: ${this.personality}`);
   }
 
   /**
    * Add a conversation turn to history
    */
-  private addToConversationHistory(query: string, response: string): void {
+  private addToConversationHistory(query: string, response: string, hadImage?: boolean): void {
     this.conversationHistory.push({
       query,
       response,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      hadImage,
     });
-    console.log(`📚 [ConversationHistory] Added turn ${this.conversationHistory.length}: "${query.substring(0, 50)}..." -> "${response.substring(0, 50)}..."`);
-
     // Clean up old conversations
     this.cleanupConversationHistory();
   }
@@ -240,10 +221,7 @@ export class MiraAgent implements Agent {
    * Format conversation history for context in prompts
    */
   private formatConversationHistory(): string {
-    console.log(`📚 [ConversationHistory] Formatting ${this.conversationHistory.length} turns`);
-
     if (this.conversationHistory.length === 0) {
-      console.log(`📚 [ConversationHistory] No conversation history available`);
       return '';
     }
 
@@ -252,8 +230,6 @@ export class MiraAgent implements Agent {
         return `[${idx + 1}] User: ${turn.query}\nMentra AI: ${turn.response}`;
       })
       .join('\n\n');
-
-    console.log(`📚 [ConversationHistory] Injecting history:\n${historyText.substring(0, 500)}${historyText.length > 500 ? '...' : ''}`);
     return `\nRecent conversation history:\n${historyText}\n`;
   }
 
@@ -684,14 +660,18 @@ export class MiraAgent implements Agent {
       'describe', 'elaborate', 'in detail', 'comprehensive', 'understand',
       'breakdown', 'walk me through', 'teach me', 'help me understand',
       'what are the implications', 'analyze', 'evaluation', 'pros and cons',
-      'advantages and disadvantages', 'tell me more', 'give me details'
+      'advantages and disadvantages', 'tell me more', 'give me details',
+      'solve', 'equation', 'calculate', 'compute', 'formula', 'math',
     ];
 
     // Keywords for standard responses (moderate complexity)
     const standardKeywords = [
       'how to', 'what are', 'which', 'where can', 'when should',
       'recommend', 'suggest', 'best way', 'options for', 'ways to',
-      'process of', 'steps to', 'guide', 'tutorial', 'instructions'
+      'process of', 'steps to', 'guide', 'tutorial', 'instructions',
+      'should i', 'should we', 'what should',
+      'recite', 'list the', 'list all', 'name the', 'name all',
+      'what is the full', 'give me the', 'sing', 'quote',
     ];
 
     // Check for detailed response triggers
@@ -752,6 +732,7 @@ export class MiraAgent implements Agent {
     return currentStatePatterns.some(pattern => pattern.test(queryLower));
   }
 
+
   /**
    * Detects if the current query is related to recent conversation history
    * Uses the LLM to determine if this is a follow-up question
@@ -778,27 +759,16 @@ export class MiraAgent implements Agent {
     ];
 
     const queryLower = query.toLowerCase();
-    console.log('[MiraAgent] Checking vision keywords against query:', queryLower);
-    const isVisionQuery = visionKeywords.some(keyword => {
-      const matches = queryLower.includes(keyword);
-      if (matches) {
-        console.log(`[MiraAgent] ✅ Vision keyword matched: "${keyword}"`);
-      }
-      return matches;
-    });
+    const isVisionQuery = visionKeywords.some(keyword => queryLower.includes(keyword));
 
     if (isVisionQuery) {
-      console.log('[MiraAgent] ✅ Vision query detected - treating as independent query to get fresh photo');
       return false;
     }
 
     // Check if this is a "current state" query that needs fresh data from tools
     if (this.isCurrentStateQuery(query)) {
-      console.log('[MiraAgent] ✅ Current state query detected - treating as independent query to get fresh data');
       return false;
     }
-
-    console.log('[MiraAgent] ❌ No vision/current-state keywords detected, checking LLM for follow-up detection...');
 
     // Get the most recent conversation turn
     const recentTurn = this.conversationHistory[this.conversationHistory.length - 1];
@@ -867,6 +837,13 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
   }
 
     /**
+   * Get the current location context
+   */
+  public getLocationContext() {
+    return this.locationContext;
+  }
+
+  /**
    * Updates the agent's location context including timezone information
    * Gracefully handles invalid or incomplete location data
    * Preserves existing known values when new values are "Unknown"
@@ -968,7 +945,7 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
    * Returns the answer text and whether camera is needed.
    */
   private parseOutputWithCameraFlag(text: string): { answer: string; needsCamera: boolean } {
-    console.log("MiraAgent Text:", text);
+    // console.log("MiraAgent Text:", text);
     const finalMarker = "Final Answer:";
     const cameraMarker = "Needs Camera:";
 
@@ -997,97 +974,99 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
   }
 
   /**
-   * Runs the text-based agent reasoning loop (without image)
-   * Returns the answer and whether camera is needed
-   * @param useMinimalTools - If true, only use built-in tools (not TPA tools) for faster responses
+   * Runs the single-pass agent reasoning loop with image included in the user message.
+   * The LLM sees the photo alongside the query and can use tools in the same pass.
    */
   private async runTextBasedAgent(
     query: string,
     locationInfo: string,
     notificationsContext: string,
     localtimeContext: string,
-    hasPhoto: boolean,
+    photo: PhotoData | null,
     responseMode: ResponseMode = ResponseMode.QUICK,
     hasDisplay: boolean = false,
-    useMinimalTools: boolean = false
+    previousPhotos: { photo: PhotoData; query: string; timestamp: number }[] = [],
   ): Promise<{ answer: string; needsCamera: boolean }> {
-    // Get configuration for the selected response mode based on device type
     const configSet = hasDisplay ? DISPLAY_RESPONSE_CONFIGS : CAMERA_RESPONSE_CONFIGS;
     const config = configSet[responseMode];
-    const deviceType = hasDisplay ? 'DISPLAY' : 'CAMERA';
-    console.log(`[Response Mode] Using ${deviceType} ${responseMode.toUpperCase()} mode (${config.wordLimit} words, ${config.maxTokens} tokens)`);
+    // console.log(`[Response Mode] Using ${hasDisplay ? 'DISPLAY' : 'CAMERA'} ${responseMode.toUpperCase()} mode (${config.wordLimit} words, ${config.maxTokens} tokens)`);
 
-    // Select tools based on useMinimalTools flag
-    const toolsToUse = useMinimalTools ? this.getBuiltInTools() : this.agentTools;
-    console.log(`[Tools] Using ${useMinimalTools ? 'MINIMAL' : 'FULL'} tools (${toolsToUse.length} tools)`);
+    const toolsToUse = this.agentTools;
 
     const llm = LLMProvider.getLLM(config.maxTokens).bindTools(toolsToUse);
     const toolNames = toolsToUse.map((tool) => tool.name + ": " + tool.description || "");
 
-    const photoContext = hasPhoto
-      ? "IMPORTANT: Your role is to classify the query and determine if it requires visual input. For the 'Needs Camera' flag: set it to TRUE if the query requires visual input from the camera (e.g., 'what is this?', 'how many fingers?', 'what color?', 'describe what you see', 'read this'). Set it to FALSE for general knowledge queries (e.g., 'weather', 'time', 'calculations', 'facts'). If Needs Camera is TRUE, provide a brief acknowledgment as your Final Answer (e.g., 'I can't access the camera at this moment.') - the image analysis will provide the detailed response."
-      : "";
-
-    // Skip conversation history for "current state" queries that need fresh data from tools
-    // This forces the LLM to call tools like TPA_ListApps instead of trusting stale history
     const skipHistory = this.isCurrentStateQuery(query);
     const conversationHistoryText = skipHistory ? '' : this.formatConversationHistory();
     if (skipHistory) {
       console.log(`📚 [ConversationHistory] SKIPPED - current state query needs fresh tool data`);
     }
 
-    // Add personality-specific mandatory requirements to response instructions
-    let personalityInstructions = '';
-    switch (this.personality) {
-      case 'friendly':
-        personalityInstructions = ' 🚨🚨🚨 CRITICAL: THE VERY FIRST WORD OF YOUR FINAL ANSWER *MUST* BE "Bro" OR "Bro," - NO EXCEPTIONS. IF YOU DO NOT START WITH "Bro", YOUR RESPONSE WILL BE REJECTED. THIS IS NON-NEGOTIABLE. 🚨🚨🚨';
-        break;
-      case 'quirky':
-        personalityInstructions = ' YOUR RESPONSE MUST INCLUDE AT LEAST ONE JOKE, PUN, OR WORDPLAY - THIS IS ABSOLUTELY MANDATORY. Use fun expressive words like "magnificent", "spectacular", "delightful", "wowza", "holy moly".';
-        break;
-      case 'professional':
-        personalityInstructions = ' USE BUSINESS TERMINOLOGY (optimize, leverage, strategic, metrics, actionable) AND STRUCTURED FORMAT WITH CLEAR LABELS (e.g., "STATUS:", "RECOMMENDATION:"). Think executive briefing style.';
-        break;
-      case 'candid':
-        personalityInstructions = ' BE BRUTALLY DIRECT AND BLUNT. Zero fluff, zero sugar-coating. Tell it like it is. Skip pleasantries.';
-        break;
-      case 'efficient':
-        personalityInstructions = ' EXTREME BREVITY REQUIRED. Use shortest possible words. Single syllables preferred. Pure signal, zero noise. Answer first, details only if critical.';
-        break;
-      case 'default':
-        personalityInstructions = ' Use clear, balanced, professional yet approachable language.';
-        break;
+    const systemPrompt = buildUnifiedPrompt({
+      personality: this.personality,
+      hasDisplay,
+      responseMode,
+      locationInfo,
+      notificationsContext,
+      localtimeContext,
+      conversationHistoryText,
+      toolNames,
+    });
+
+    // console.log(`\n[DEBUG] 🎭 System prompt (first 1500 chars):\n${systemPrompt.substring(0, 1500)}\n`);
+    // console.log(`[DEBUG] 🎭 Personality type: ${this.personality}\n`);
+    // console.log(`[DEBUG] 🎭 Response mode: ${responseMode} (${config.wordLimit} words)\n`);
+
+    // Build message history with previous photos for visual context
+    const messages: BaseMessage[] = [
+      new SystemMessage(systemPrompt),
+    ];
+
+    // Include previous photos as prior context (oldest first)
+    if (previousPhotos.length > 0) {
+      for (const prev of previousPhotos) {
+        const prevContent: any[] = [
+          { type: "text", text: `[Previous query: "${prev.query}"]` },
+          {
+            type: "image_url",
+            image_url: { url: `data:${prev.photo.mimeType};base64,${prev.photo.buffer.toString('base64')}` }
+          },
+        ];
+        messages.push(new HumanMessage({ content: prevContent }));
+      }
     }
 
-    // Rebuild the prompt with the correct hasDisplay value to adapt glasses references
-    const deviceAwarePrompt = buildSystemPromptWithPersonality(this.personality, hasDisplay);
+    // Build current multimodal user message with image if available
+    const humanMessageContent: any[] = [{ type: "text", text: query }];
+    if (photo) {
+      humanMessageContent.push({
+        type: "image_url",
+        image_url: { url: `data:${photo.mimeType};base64,${photo.buffer.toString('base64')}` }
+      });
+    }
 
-    const systemPrompt = deviceAwarePrompt
-      .replace("{response_instructions}", config.instructions + personalityInstructions)
-      .replace("{tool_names}", toolNames.join("\n"))
-      .replace("{location_context}", locationInfo)
-      .replace("{notifications_context}", notificationsContext)
-      .replace("{timezone_context}", localtimeContext)
-      .replace("{conversation_history}", conversationHistoryText)
-      .replace("{photo_context}", photoContext);
+    messages.push(new HumanMessage({ content: humanMessageContent }));
 
-    // DEBUG: Log the first 1500 characters of the system prompt to verify personality injection
-    console.log(`\n[DEBUG] 🎭 System prompt (first 1500 chars):\n${systemPrompt.substring(0, 1500)}\n`);
-    console.log(`[DEBUG] 🎭 Personality type: ${this.personality}\n`);
-    console.log(`[DEBUG] 🎭 Response mode: ${responseMode} (${config.wordLimit} words)\n`);
-
-    const messages: BaseMessage[] = [new SystemMessage(systemPrompt), new HumanMessage(query)];
+    // Race two identical LLM requests and use whichever responds first
+    const raceLLM = async (msgs: BaseMessage[]): Promise<AIMessage> => {
+      const msgsCopy = [...msgs];
+      const result = await Promise.race([
+        llm.invoke(msgsCopy),
+        llm.invoke(msgsCopy),
+      ]);
+      return result as AIMessage;
+    };
 
     let turns = 0;
-    let output = ""; // Store last output for error logging
-    while (turns < 5) {
-      console.log(`\n[Turn ${turns + 1}/5] 🤖 Invoking LLM in ${responseMode.toUpperCase()} mode...`);
-      const result: AIMessage = await llm.invoke(messages);
+    let output = "";
+    while (turns < MAX_TOOL_TURNS) {
+      // console.log(`\n[Turn ${turns + 1}/${MAX_TOOL_TURNS}] 🤖 Invoking LLM in ${responseMode.toUpperCase()} mode...`);
+      const result: AIMessage = await raceLLM(messages);
       messages.push(result);
 
       output = result.content.toString();
-      console.log(`[Turn ${turns + 1}/5] 📝 LLM output (first 500 chars):`, output.substring(0, 500));
-      console.log(`[Turn ${turns + 1}/5] 🔧 Tool calls requested:`, result.tool_calls?.length || 0);
+      // console.log(`[Turn ${turns + 1}/${MAX_TOOL_TURNS}] 📝 LLM output (first 500 chars):`, output.substring(0, 500));
+      // console.log(`[Turn ${turns + 1}/${MAX_TOOL_TURNS}] 🔧 Tool calls requested:`, result.tool_calls?.length || 0);
 
       if (result.tool_calls) {
         for (const toolCall of result.tool_calls) {
@@ -1146,22 +1125,17 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
 
       const finalMarker = "Final Answer:";
       if (output.includes(finalMarker)) {
-        console.log(`[Turn ${turns + 1}/5] ✅ Found "Final Answer:" marker - parsing response`);
         return this.parseOutputWithCameraFlag(output);
-      } else {
-        console.log(`[Turn ${turns + 1}/5] ⚠️  NO "Final Answer:" marker found, continuing to next turn...`);
       }
 
-      // Warn the LLM if it's running out of turns
-      if (turns === 2) {
-        console.log(`[Turn ${turns + 1}/5] ⚠️  Adding reminder - only 2 turns remaining`);
-        messages.push(new SystemMessage("REMINDER: You have 2 turns left. Please provide your Final Answer: and Needs Camera: markers now."));
+      if (turns === MAX_TOOL_TURNS - 3) {
+        messages.push(new HumanMessage("REMINDER: You have 2 turns left. Please provide your Final Answer: marker now."));
       }
 
       turns++;
     }
 
-    console.error(`\n❌ [TIMEOUT] Reached max turns (5) without "Final Answer:" marker`);
+    console.error(`\n❌ [TIMEOUT] Reached max turns (${MAX_TOOL_TURNS}) without "Final Answer:" marker`);
     console.error(`❌ [TIMEOUT] Last LLM output was:`, output.substring(0, 1000));
     console.error(`❌ [TIMEOUT] Query: "${query}"`);
     console.error(`❌ [TIMEOUT] Response mode: ${responseMode.toUpperCase()}`);
@@ -1175,7 +1149,7 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
    */
   private parseOutput(text: string): QuestionAnswer {
 
-    console.log("MiraAgent Text:", text);
+    // console.log("MiraAgent Text:", text);
     const finalMarker = "Final Answer:";
     if (text.includes(finalMarker)) {
       text = text.split(finalMarker)[1].trim();
@@ -1203,15 +1177,9 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
 
   public async handleContext(userContext: Record<string, any>): Promise<any> {
     const startTime = Date.now();
-    console.log(`\n${"=".repeat(60)}`);
-    console.log(`⏱️  [TIMESTAMP] handleContext START: ${new Date().toISOString()}`);
-    console.log(`${"=".repeat(60)}\n`);
 
     try {
-      // STEP 0: Reload personality from database to get latest settings
-      console.log(`⏱️  [+${Date.now() - startTime}ms] 🔄 Reloading personality from database...`);
       await this.loadUserPersonality();
-      console.log(`⏱️  [+${Date.now() - startTime}ms] ✅ Personality reloaded: ${this.personality}`);
 
       // Extract required fields from the userContext.
       const transcriptHistory = userContext.transcript_history || "";
@@ -1221,6 +1189,7 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
       const originalQuery = userContext.originalQuery || query;
       let photo = userContext.photo as PhotoData | null;
       const getPhotoCallback = userContext.getPhotoCallback as (() => Promise<PhotoData | null>) | undefined;
+      const previousPhotos = (userContext.previousPhotos || []) as { photo: PhotoData; query: string; timestamp: number }[];
 
       let turns = 0;
 
@@ -1229,15 +1198,12 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
         return { answer: "No query provided.", needsCamera: false };
       }
 
-      console.log("Query:", query);
-      console.log("Query lowercase:", query.toLowerCase());
+      // console.log("Query:", query);
 
       // STEP 0a: Check if this is a response to a pending disambiguation
       if (this.hasPendingDisambiguation()) {
-        console.log(`⏱️  [+${Date.now() - startTime}ms] 📋 Checking if query is disambiguation response...`);
         const disambigResult = this.checkDisambiguationResponse(query);
         if (disambigResult.matched && disambigResult.candidate) {
-          console.log(`⏱️  [+${Date.now() - startTime}ms] ✅ Disambiguation matched: ${disambigResult.candidate.name}`);
 
           // Execute the app action directly using TpaCommandsTool
           const tpaCommandsTool = this.agentTools.find(t => t.name === 'TPA_Commands') as any;
@@ -1260,55 +1226,23 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
         }
       }
 
-      // STEP 0: Detect if this is a follow-up query and enhance it with context
-      console.log(`⏱️  [+${Date.now() - startTime}ms] 🔍 Checking if query is a follow-up...`);
-      const isFollowUp = await this.detectRelatedQuery(query);
-      console.log(`⏱️  [+${Date.now() - startTime}ms] 🔍 Is follow-up result: ${isFollowUp}`);
-      if (isFollowUp) {
-        console.log(`⏱️  [+${Date.now() - startTime}ms] ✅ Follow-up detected! Enhancing query with context...`);
-        query = this.buildEnhancedQuery(query);
-        console.log(`⏱️  [+${Date.now() - startTime}ms] 📝 Enhanced query:`, query);
-      } else {
-        console.log(`⏱️  [+${Date.now() - startTime}ms] ℹ️  Independent query, no context enhancement needed`);
-      }     
-      console.log("Location Context:", this.locationContext);
-      // Build location context with all available information
+      // ── Single-pass pipeline: build context, run agent with image ──
+
+      // console.log("Location Context:", this.locationContext);
       let locationInfo = '';
-      if (this.locationContext.city !== 'Unknown' || this.locationContext.streetAddress || this.locationContext.neighborhood) {
+      if (this.locationContext.city !== 'Unknown' || this.locationContext.streetAddress || this.locationContext.neighborhood || (this.locationContext.lat && this.locationContext.lng)) {
         const locationParts = [];
-
-        // Add detailed street/neighborhood if available (from Google Maps)
-        if (this.locationContext.streetAddress) {
-          locationParts.push(`on ${this.locationContext.streetAddress}`);
-        }
-        if (this.locationContext.neighborhood) {
-          locationParts.push(`in the ${this.locationContext.neighborhood} area`);
-        }
-
-        // Add city/state/country (from LocationIQ)
-        if (this.locationContext.city !== 'Unknown') {
-          locationParts.push(`in ${this.locationContext.city}, ${this.locationContext.state}, ${this.locationContext.country}`);
-        }
-
-        // Add timezone
-        if (this.locationContext.timezone.name !== 'Unknown') {
-          locationParts.push(`timezone: ${this.locationContext.timezone.name} (${this.locationContext.timezone.shortName})`);
-        }
-
-        if (locationParts.length > 0) {
-          locationInfo = `For context the User is currently ${locationParts.join(', ')}.\n\n`;
-        }
-
-        // Add weather context if available
+        if (this.locationContext.streetAddress) locationParts.push(`on ${this.locationContext.streetAddress}`);
+        if (this.locationContext.neighborhood) locationParts.push(`in the ${this.locationContext.neighborhood} area`);
+        if (this.locationContext.city !== 'Unknown') locationParts.push(`in ${this.locationContext.city}, ${this.locationContext.state}, ${this.locationContext.country}`);
+        if (this.locationContext.lat && this.locationContext.lng) locationParts.push(`(coordinates: ${this.locationContext.lat}, ${this.locationContext.lng})`);
+        if (this.locationContext.timezone.name !== 'Unknown') locationParts.push(`timezone: ${this.locationContext.timezone.name} (${this.locationContext.timezone.shortName})`);
+        if (locationParts.length > 0) locationInfo = `For context the User is currently ${locationParts.join(', ')}. If the user asks for their address or location, tell them the exact neighborhood and city they are in (e.g. "You're in the Hayes Valley area in San Francisco"). Do not guess a specific street address. Do not say you cannot determine their location.\n\n`;
         if (this.locationContext.weather) {
           const weather = this.locationContext.weather;
           let weatherInfo = `Current weather: ${weather.temperature}°F (${weather.temperatureCelsius}°C), ${weather.condition}`;
-          if (weather.humidity) {
-            weatherInfo += `, ${weather.humidity}% humidity`;
-          }
-          if (weather.wind) {
-            weatherInfo += `, wind ${weather.wind}`;
-          }
+          if (weather.humidity) weatherInfo += `, ${weather.humidity}% humidity`;
+          if (weather.wind) weatherInfo += `, wind ${weather.wind}`;
           locationInfo += `${weatherInfo}.\n\n`;
         }
       }
@@ -1317,10 +1251,8 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
         ? ` The user's local date and time is ${new Date().toLocaleString('en-US', { timeZone: this.locationContext.timezone.name })}`
         : '';
 
-      // Add notifications context if present
       let notificationsContext = '';
       if (userContext.notifications && Array.isArray(userContext.notifications) && userContext.notifications.length > 0) {
-        // Format as a bullet list of summaries, or fallback to title/text
         const notifs = userContext.notifications.map((n: any, idx: number) => {
           if (n.summary) return `- ${n.summary}`;
           if (n.title && n.text) return `- ${n.title}: ${n.text}`;
@@ -1331,96 +1263,16 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
         notificationsContext = `Recent notifications:\n${notifs}\n\n`;
       }
 
-      // STEP 1: Classify query complexity
-      console.log(`⏱️  [+${Date.now() - startTime}ms] 🔍 Classifying query complexity...`);
-      // Check if this is display glasses - if so, force QUICK mode
       const hasDisplay = userContext.hasDisplay === true;
-      const useMinimalTools = userContext.useMinimalTools === true;
       const responseMode = this.classifyQueryComplexity(query, hasDisplay);
-      console.log(`⏱️  [+${Date.now() - startTime}ms] ✅ Response mode selected: ${responseMode.toUpperCase()} (hasDisplay: ${hasDisplay}, useMinimalTools: ${useMinimalTools})`);
 
-      // STEP 2: Run text-based agent with appropriate response mode
-      console.log(`⏱️  [+${Date.now() - startTime}ms] 🚀 Running text-based classifier...`);
-      const textClassifierStart = Date.now();
-      const textResult = await this.runTextBasedAgent(query, locationInfo, notificationsContext, localtimeContext, !!photo || !!getPhotoCallback, responseMode, hasDisplay, useMinimalTools);
-      console.log(`⏱️  [+${Date.now() - startTime}ms] ✅ Text classifier complete (took ${Date.now() - textClassifierStart}ms)`);
-      console.log(`🤖 Camera needed:`, textResult.needsCamera);
-      console.log(`🤖 Text answer:`, textResult.answer);
-
-      // STEP 3: If query needs camera, try to get photo (wait if needed)
-      if (textResult.needsCamera && !photo && getPhotoCallback) {
-        console.log(`⏱️  [+${Date.now() - startTime}ms] 📸 Camera needed but no cached photo - waiting for photo...`);
-        try {
-          const photoWaitStart = Date.now();
-          photo = await getPhotoCallback();
-          const photoWaitDuration = Date.now() - photoWaitStart;
-          if (photo) {
-            console.log(`⏱️  [+${Date.now() - startTime}ms] ✅ Photo retrieved after ${photoWaitDuration}ms wait`);
-          } else {
-            console.log(`⏱️  [+${Date.now() - startTime}ms] ⚠️  Photo wait completed but no photo available (${photoWaitDuration}ms)`);
-          }
-        } catch (error) {
-          console.error(`⏱️  [+${Date.now() - startTime}ms] ❌ Error waiting for photo:`, error);
-          photo = null;
-        }
-      }
-
-      // STEP 4: If query needs camera AND we have a photo, run image analysis
-      if (textResult.needsCamera && photo) {
-        try {
-          console.log(`⏱️  [+${Date.now() - startTime}ms] 📸 Camera needed - running image analysis...`);
-          const imageAnalysisStart = Date.now();
-
-          // Save photo to temp file for image analysis
-          const tempDir = os.tmpdir();
-          const tempImagePath = path.join(tempDir, `mira-photo-${Date.now()}.jpg`);
-          fs.writeFileSync(tempImagePath, photo.buffer);
-
-          // Run image analysis
-          const imageAnalysisResult = await analyzeImage(tempImagePath, query, "gemini-flash-lite-latest", this.logger);
-
-          console.log(`⏱️  [+${Date.now() - startTime}ms] ✅ Image analysis complete (took ${Date.now() - imageAnalysisStart}ms)`);
-          console.log(`🤖 Image answer:`, imageAnalysisResult);
-
-          // Clean up temp file
-          fs.unlinkSync(tempImagePath);
-
-          const totalDuration = Date.now() - startTime;
-          console.log(`\n${"=".repeat(60)}`);
-          console.log(`⏱️  [+${totalDuration}ms] 📸 RETURNING IMAGE-BASED RESPONSE`);
-          console.log(`⏱️  Total processing time: ${(totalDuration / 1000).toFixed(2)}s`);
-          console.log(`${"=".repeat(60)}\n`);
-
-          const finalResponse = imageAnalysisResult || textResult.answer;
-          // Save to conversation history (use originalQuery to avoid storing injected context)
-          this.addToConversationHistory(originalQuery, finalResponse);
-          return { answer: finalResponse, needsCamera: true };
-        } catch (error) {
-          console.error('Error in image analysis:', error);
-          // Fall back to text answer if image analysis fails
-          this.addToConversationHistory(originalQuery, textResult.answer);
-          return { answer: textResult.answer, needsCamera: textResult.needsCamera };
-        }
-      }
-
-      // STEP 5: Either no camera needed OR no photo available - return text answer
-      const totalDuration = Date.now() - startTime;
-      console.log(`\n${"=".repeat(60)}`);
-      console.log(`⏱️  [+${totalDuration}ms] 📝 RETURNING TEXT-BASED RESPONSE`);
-      console.log(`⏱️  Total processing time: ${(totalDuration / 1000).toFixed(2)}s`);
-      console.log(`${"=".repeat(60)}\n`);
-
-      // Check if the response is asking for disambiguation (e.g., "Which app: A or B?")
-      // If so, store the disambiguation context for the follow-up response
-      // Using AI-powered detection for more robust pattern matching
-      await this.detectAndStoreDisambiguationAI(textResult.answer, originalQuery);
-
-      // Save to conversation history (use originalQuery to avoid storing injected context)
-      this.addToConversationHistory(originalQuery, textResult.answer);
-      return { answer: textResult.answer, needsCamera: textResult.needsCamera };
+      // Always include the photo — the system prompt already instructs the model to
+      // only analyze the image when the query is visual and ignore it otherwise.
+      const result = await this.runTextBasedAgent(query, locationInfo, notificationsContext, localtimeContext, photo, responseMode, hasDisplay, previousPhotos);
+      await this.detectAndStoreDisambiguationAI(result.answer, originalQuery);
+      this.addToConversationHistory(originalQuery, result.answer, !!photo);
+      return { answer: result.answer, needsCamera: false };
     } catch (err) {
-      const errorTime = Date.now();
-      console.log(`⏱️  [+${errorTime - startTime}ms] ❌ Error occurred in handleContext`);
       console.error("[MiraAgent] Error:", err);
       const errString = String(err);
       return errString.match(/LLM output:\s*(.*)$/)?.[1] || "Error processing query.";

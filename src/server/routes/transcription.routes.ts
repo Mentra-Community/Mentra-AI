@@ -1,16 +1,15 @@
 import { Router } from 'express';
-import { TranscriptionAPI } from '../api/transcription.api';
+import { ChatAPI } from '../api/chat.api';
 
 /**
  * Creates transcription routes
- * @param transcriptionAPI - The TranscriptionAPI controller instance
- * @returns Express Router with transcription routes
+ * @param chatAPI - The ChatAPI controller instance (handles transcription streaming too)
  */
-export function createTranscriptionRoutes(transcriptionAPI: TranscriptionAPI): Router {
+export function createTranscriptionRoutes(chatAPI: ChatAPI): Router {
   const router = Router();
 
   // GET /api/transcription/stream - SSE for live transcription
-  router.get('/stream', (req, res) => transcriptionAPI.streamTranscription(req, res));
+  router.get('/stream', (req, res) => chatAPI.streamTranscription(req, res));
 
   return router;
 }

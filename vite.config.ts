@@ -21,16 +21,7 @@ export default defineConfig({
     proxy: {
       '/api': {
         target: 'http://localhost:3000',
-        changeOrigin: true,
-        // Special handling for SSE
-        configure: (proxy, _options) => {
-          proxy.on('proxyReq', (proxyReq, req, _res) => {
-            console.log('[Vite Proxy] 📡 Proxying:', req.method, req.url, '→', proxyReq.path);
-          });
-          proxy.on('proxyRes', (proxyRes, req, _res) => {
-            console.log('[Vite Proxy] ✅ Response:', req.url, '→', proxyRes.statusCode);
-          });
-        }
+        changeOrigin: true
       },
       '/webview': {
         target: 'http://localhost:3000',

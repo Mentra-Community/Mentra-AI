@@ -4,6 +4,7 @@
   "main": "dist/index.js",
   "type": "module",
   "scripts": {
+    "postinstall": "sed -i'' -e 's/this.model.startsWith(\"gemini-2\")/this.model.startsWith(\"gemini-2\") || this.model.startsWith(\"gemini-3\")/' node_modules/@langchain/google-genai/dist/chat_models.js 2>/dev/null || true",
     "dev": "concurrently \"bun run dev:backend\" \"bun run dev:frontend\"",
     "dev:backend": "bun --watch src/server/index.ts",
     "dev:frontend": "vite",
@@ -46,7 +47,8 @@
     "@googlemaps/google-maps-services-js": "^3.4.2",
     "@langchain/anthropic": "^0.3.16",
     "@langchain/community": "^0.3.39",
-    "@langchain/core": "^0.3.55",
+    "@langchain/core": "0.3.58",
+    "@langchain/google-genai": "0.2.18",
     "@langchain/google-vertexai": "^0.2.3",
     "@langchain/openai": "^0.5.4",
     "@mentra/react": "^2.0.2",
@@ -66,6 +68,7 @@
     "pinyin-pro": "^3.26.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "react-markdown": "^10.1.0",
     "serpapi": "^2.2.1",
     "uuid": "^11.1.0",
     "ws": "^8.18.1"
