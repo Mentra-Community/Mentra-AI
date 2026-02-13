@@ -21,6 +21,7 @@ import { TranscriptionManager, getCleanServerUrl } from './manager/transcription
 import { notificationsManager } from './manager/notifications.manager';
 import { createTranscriptionStream } from '@mentra/sdk';
 import { UserSettings } from './schemas';
+import { Time } from './manager/time.manager';
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 80;
 const PACKAGE_NAME = process.env.PACKAGE_NAME;
@@ -180,6 +181,21 @@ class MiraServer extends AppServer {
     }
 
     this.agentPerSession.set(sessionId, agent);
+
+    // Initialize Time from SDK's userTimezone setting
+    const userTimezone = session.settings.getMentraOS<string>('userTimezone');
+    if (userTimezone) {
+      agent.setTime(new Time(userTimezone));
+      logger.info(`Set user timezone: ${userTimezone}`);
+    }
+
+    // Update timezone if it changes during the session
+    session.settings.onMentraosChange<string>('userTimezone', (newTimezone) => {
+      if (newTimezone) {
+        agent.setTime(new Time(newTimezone));
+        logger.info(`Updated user timezone: ${newTimezone}`);
+      }
+    });
 
     // Create broadcast function for transcription SSE
     const broadcastTranscription = createTranscriptionBroadcaster(this.transcriptionSSEManager, userId);

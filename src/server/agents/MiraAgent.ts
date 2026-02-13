@@ -23,6 +23,7 @@ import { TpaToolInvokeTool } from "./tools/TpaToolInvokeTool";
 import { ThinkingTool } from "./tools/ThinkingTool";
 import { Calculator } from "@langchain/community/tools/calculator";
 import { AppServer, PhotoData, GIVE_APP_CONTROL_OF_TOOL_RESPONSE, logger as _logger } from "@mentra/sdk";
+import { Time } from "../manager/time.manager";
 import type { Logger } from "pino";
 import {
   ResponseMode,
@@ -65,6 +66,7 @@ export class MiraAgent implements Agent {
   private userId: string;
   private personality: PersonalityType = 'default';
   private logger: Logger;
+  private time: Time | null = null;
 
   public messages: BaseMessage[] = [];
   private conversationHistory: ConversationTurn[] = [];
@@ -129,52 +131,17 @@ export class MiraAgent implements Agent {
       new Calculator(),
     ];
 
-    // Initialize with system timezone as fallback
-    this.initializeSystemTimezone();
+    // Timezone is now set via setTime() from the SDK's userTimezone setting
 
     // Load user personality asynchronously
     this.loadUserPersonality();
   }
 
   /**
-   * Initialize location context with system timezone as fallback
-   * This ensures we at least have correct time information even if GPS location is unavailable
+   * Set the Time instance for this agent (from SDK's userTimezone setting)
    */
-  private initializeSystemTimezone(): void {
-    try {
-      // Get system timezone using Intl API
-      const systemTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-
-      if (systemTimezone && systemTimezone !== 'Unknown') {
-        // Calculate offset in seconds
-        const now = new Date();
-        const offsetMinutes = -now.getTimezoneOffset(); // getTimezoneOffset returns opposite sign
-        const offsetSec = offsetMinutes * 60;
-
-        // Determine if DST is active (approximation based on offset changes)
-        const januaryOffset = new Date(now.getFullYear(), 0, 1).getTimezoneOffset();
-        const julyOffset = new Date(now.getFullYear(), 6, 1).getTimezoneOffset();
-        const isDst = offsetMinutes > Math.max(januaryOffset, julyOffset) * -1;
-
-        // Get short timezone name (e.g., "PST", "EST")
-        const shortName = now.toLocaleTimeString('en-US', { timeZoneName: 'short' })
-          .split(' ')
-          .pop() || 'Unknown';
-
-        this.locationContext.timezone = {
-          name: systemTimezone,
-          shortName: shortName,
-          fullName: systemTimezone,
-          offsetSec: offsetSec,
-          isDst: isDst
-        };
-
-        console.log(`[MiraAgent] Initialized with system timezone: ${systemTimezone} (${shortName})`);
-      }
-    } catch (error) {
-      console.warn('[MiraAgent] Failed to initialize system timezone:', error);
-      // Keep default "Unknown" values
-    }
+  public setTime(time: Time): void {
+    this.time = time;
   }
 
   /**
@@ -1236,7 +1203,7 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
         if (this.locationContext.neighborhood) locationParts.push(`in the ${this.locationContext.neighborhood} area`);
         if (this.locationContext.city !== 'Unknown') locationParts.push(`in ${this.locationContext.city}, ${this.locationContext.state}, ${this.locationContext.country}`);
         if (this.locationContext.lat && this.locationContext.lng) locationParts.push(`(coordinates: ${this.locationContext.lat}, ${this.locationContext.lng})`);
-        if (this.locationContext.timezone.name !== 'Unknown') locationParts.push(`timezone: ${this.locationContext.timezone.name} (${this.locationContext.timezone.shortName})`);
+        if (this.time) locationParts.push(`timezone: ${this.time.getTimezone()}`);
         if (locationParts.length > 0) locationInfo = `For context the User is currently ${locationParts.join(', ')}. If the user asks for their address or location, tell them the exact neighborhood and city they are in (e.g. "You're in the Hayes Valley area in San Francisco"). Do not guess a specific street address. Do not say you cannot determine their location.\n\n`;
         if (this.locationContext.weather) {
           const weather = this.locationContext.weather;
@@ -1247,8 +1214,8 @@ Answer with ONLY "YES" if it's a follow-up that needs context from the previous 
         }
       }
 
-      const localtimeContext = this.locationContext.timezone.name !== 'Unknown'
-        ? ` The user's local date and time is ${new Date().toLocaleString('en-US', { timeZone: this.locationContext.timezone.name })}`
+      const localtimeContext = this.time
+        ? ` The user's local date and time is ${this.time.getLocalDateTime()}`
         : '';
 
       let notificationsContext = '';
