@@ -21,18 +21,18 @@ function Header({
       {showBackArrow ? (
         <button
           onClick={onSettingsClick}
-          className="w-[60px] h-[60px] rounded-full flex items-center justify-center transition-all duration-300 hover:opacity-80 hover:scale-110"
+          className=" rounded-full flex items-center justify-center transition-all duration-300 hover:opacity-80 hover:scale-110"
           style={{ backgroundColor: 'var(--primary-foreground)' }}
         >
-          <ArrowLeft className="w-[20px] h-[20px]" style={{ color: 'var(--secondary-foreground)' }} />
+          <ArrowLeft className="w-6 h-6" style={{ color: 'var(--secondary-foreground)' }} />
         </button>
       ) : (
         <button
           onClick={onSettingsClick}
-          className="w-[50px] h-[50px] rounded-full flex items-center justify-center transition-all duration-300 hover:opacity-80 hover:scale-110"
+          className=" rounded-full flex items-center justify-center transition-all duration-300 hover:opacity-80 hover:scale-110"
           style={{ backgroundColor: 'var(--primary-foreground)' }}
         >
-          <Settings className="w-[20px] h-[20px]" style={{ color: 'var(--secondary-foreground)' }} />
+          <Settings className="w-6 h-6" style={{ color: 'var(--secondary-foreground)' }} />
         </button>
       )}
 

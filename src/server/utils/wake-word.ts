@@ -12,6 +12,16 @@
  */
 export const WAKE_WORDS = [
   "hey mentra",
+  "hey mantra",
+  "hey mintra",
+  "hey muntra",
+
+  "hi mentra",
+  "hi mantra",
+  "hi mintra",
+  "hi muntra"
+
+
 ];
 
 /**

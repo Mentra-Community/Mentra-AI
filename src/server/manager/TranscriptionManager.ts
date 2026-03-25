@@ -271,20 +271,15 @@ export class TranscriptionManager {
     const timeSinceWake = silenceDetectedAt - this.transcriptionStartTime;
     console.log(`⏱️ [SILENCE] Query ready: "${query}" (${timeSinceWake}ms since wake word)`);
 
-    // Run visual classifier + photo await in parallel
+    // Always pass the photo — no classifier, image is always included in context
     let prePhoto: StoredPhoto | null = null;
-    let isVisual: boolean | undefined;
-
-    const { isVisualQuery } = await import("../agent/visual-classifier");
-    const [classifierResult, photoResult] = await Promise.allSettled([
-      isVisualQuery(query),
-      this.pendingPhoto ?? Promise.resolve(null),
-    ]);
+    try {
+      prePhoto = await (this.pendingPhoto ?? Promise.resolve(null));
+    } catch {
+      prePhoto = null;
+    }
     this.pendingPhoto = null;
-
-    isVisual = classifierResult.status === 'fulfilled' ? classifierResult.value : undefined;
-    prePhoto = photoResult.status === 'fulfilled' ? photoResult.value : null;
-    console.log(`⏱️ [PHOTO+CLASSIFY] photo=${prePhoto ? 'yes' : 'no'} | isVisual=${isVisual ?? 'n/a'}`);
+    console.log(`⏱️ [PHOTO] photo=${prePhoto ? 'yes' : 'no'}`);
 
     // Bail if session destroyed during photo wait
     if (this.destroyed) {
@@ -294,7 +289,7 @@ export class TranscriptionManager {
 
     try {
       if (this.onQueryReady) {
-        await this.onQueryReady(query, this.activeSpeakerId, prePhoto, isVisual);
+        await this.onQueryReady(query, this.activeSpeakerId, prePhoto, true);
       }
     } catch (error) {
       console.error('Error processing query:', error);

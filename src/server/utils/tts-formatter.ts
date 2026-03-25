@@ -151,7 +151,7 @@ export function formatForTTS(text: string): string {
   result = result.replace(/\blbs?\b/gi, 'pounds');
   result = result.replace(/\bkg\b/gi, 'kilograms');
   result = result.replace(/\bft\b/gi, 'feet');
-  result = result.replace(/\bin\b/gi, 'inches');
+  // "in" removed — too easily matches the preposition "in"
   result = result.replace(/\bcm\b/gi, 'centimeters');
   result = result.replace(/\bmm\b/gi, 'millimeters');
 
