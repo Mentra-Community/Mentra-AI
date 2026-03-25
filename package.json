@@ -4,7 +4,7 @@
   "type": "module",
   "module": "src/index.ts",
   "scripts": {
-    "dev": "NODE_ENV=development bun --watch src/index.ts",
+    "dev": "lsof -ti:3000 | xargs kill -9 2>/dev/null; ngrok http --domain=general.dev.tpa.ngrok.app 3000 &>/dev/null & NODE_ENV=development bun --watch src/index.ts",
     "start": "bun src/index.ts",
     "test:visual": "bun test ./src/server/test/visual/visual-classifier.test.ts",
     "test:visual:easy": "EVAL_DIFFICULTY=easy bun test ./src/server/test/visual/visual-classifier.test.ts",

@@ -271,18 +271,20 @@ export class TranscriptionManager {
     const timeSinceWake = silenceDetectedAt - this.transcriptionStartTime;
     console.log(`⏱️ [SILENCE] Query ready: "${query}" (${timeSinceWake}ms since wake word)`);
 
-    // Always wait for the pre-captured photo (no classifier — always include it)
+    // Run visual classifier + photo await in parallel
     let prePhoto: StoredPhoto | null = null;
-    if (this.pendingPhoto) {
-      const photoWaitStart = Date.now();
-      try {
-        prePhoto = await this.pendingPhoto;
-      } catch (error) {
-        console.warn('Pre-captured photo failed:', error);
-      }
-      this.pendingPhoto = null;
-      console.log(`⏱️ [PHOTO-AWAIT] ${Date.now() - photoWaitStart}ms | photo=${prePhoto ? 'yes' : 'no'}`);
-    }
+    let isVisual: boolean | undefined;
+
+    const { isVisualQuery } = await import("../agent/visual-classifier");
+    const [classifierResult, photoResult] = await Promise.allSettled([
+      isVisualQuery(query),
+      this.pendingPhoto ?? Promise.resolve(null),
+    ]);
+    this.pendingPhoto = null;
+
+    isVisual = classifierResult.status === 'fulfilled' ? classifierResult.value : undefined;
+    prePhoto = photoResult.status === 'fulfilled' ? photoResult.value : null;
+    console.log(`⏱️ [PHOTO+CLASSIFY] photo=${prePhoto ? 'yes' : 'no'} | isVisual=${isVisual ?? 'n/a'}`);
 
     // Bail if session destroyed during photo wait
     if (this.destroyed) {
@@ -292,7 +294,7 @@ export class TranscriptionManager {
 
     try {
       if (this.onQueryReady) {
-        await this.onQueryReady(query, this.activeSpeakerId, prePhoto);
+        await this.onQueryReady(query, this.activeSpeakerId, prePhoto, isVisual);
       }
     } catch (error) {
       console.error('Error processing query:', error);

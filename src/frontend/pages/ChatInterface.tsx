@@ -405,7 +405,6 @@ function ChatInterface({ userId, recipientId, onEnableDebugMode }: ChatInterface
           isDarkMode={isDarkMode}
           onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
           onSettingsClick={() => setCurrentPage('settings')}
-          showMenuButton={chatHistoryEnabled}
         />
 
         {/* Main Content Area */}

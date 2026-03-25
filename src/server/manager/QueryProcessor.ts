@@ -55,7 +55,7 @@ export class QueryProcessor {
     let photoDataUrl: string | undefined;
 
     if (hasCamera) {
-      if (prePhoto) {
+      if (prePhoto && isVisual !== false) {
         console.log(`📸 Using pre-captured photo for ${this.user.userId}`);
         photos = this.user.photo.getPhotosForContext();
         photoDataUrl = `data:${prePhoto.mimeType};base64,${prePhoto.buffer.toString("base64")}`;
@@ -304,13 +304,11 @@ export class QueryProcessor {
       }
     }
 
-    // Speak if speakers available
+    // Speak if speakers available (fire-and-forget — don't await, it blocks 3-5s)
     if (hasSpeakers) {
-      try {
-        await session.audio.speak(response);
-      } catch (error) {
+      session.audio.speak(response).catch((error) => {
         console.debug("Speech output failed:", error);
-      }
+      });
     }
   }
 }
