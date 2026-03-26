@@ -19,7 +19,22 @@ export const WAKE_WORDS = [
   "hi mentra",
   "hi mantra",
   "hi mintra",
-  "hi muntra"
+  "hi muntra",
+
+  "ok mentra",
+  "ok mantra",
+  "ok mintra",
+  "ok muntra",
+
+  "okay mentra",
+  "okay mantra",
+  "okay mintra",
+  "okay muntra",
+
+  "hello mentra",
+  "hello mantra",
+  "hello mintra",
+  "hello muntra",
 
 
 ];
@@ -34,8 +49,8 @@ const WAKE_PATTERNS: RegExp[] = WAKE_WORDS.map((ww) => {
   for (let i = 0; i < ww.length; i++) {
     const ch = ww[i];
     if (ch === ' ') {
-      // Word boundary — require one or more whitespace
-      pattern += '\\s+';
+      // Word boundary — allow optional punctuation (comma, period) + whitespace
+      pattern += '[,.!?;:\\s]*\\s+';
     } else {
       pattern += ch;
       // Between consecutive letters in the same word, allow optional whitespace

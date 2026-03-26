@@ -169,9 +169,9 @@ export class QueryProcessor {
       context.hasDisplay
     );
 
-    // Step 7: Stop processing sound loop and output response
+    // Step 7: Stop processing sound loop and output response (fire-and-forget — don't block pipeline)
     this.stopProcessingSound();
-    await this.outputResponse(formattedResponse, context.hasSpeakers, context.hasDisplay);
+    this.outputResponse(formattedResponse, context.hasSpeakers, context.hasDisplay);
     lap('OUTPUT-TO-GLASSES');
 
     // Step 8: Save to chat history

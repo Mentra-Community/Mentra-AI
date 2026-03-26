@@ -35,7 +35,7 @@ export interface AgentContext {
 /**
  * LLM model and provider info
  */
-const LLM_MODEL = process.env.LLM_MODEL || "gemini-2.5-flash";
+const LLM_MODEL = process.env.LLM_MODEL || "gemini-3.1-flash-lite-preview";
 const LLM_PROVIDER = process.env.LLM_PROVIDER || "Google";
 
 /**
