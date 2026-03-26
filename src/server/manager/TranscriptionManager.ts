@@ -271,18 +271,15 @@ export class TranscriptionManager {
     const timeSinceWake = silenceDetectedAt - this.transcriptionStartTime;
     console.log(`⏱️ [SILENCE] Query ready: "${query}" (${timeSinceWake}ms since wake word)`);
 
-    // Always wait for the pre-captured photo (no classifier — always include it)
+    // Always pass the photo — no classifier, image is always included in context
     let prePhoto: StoredPhoto | null = null;
-    if (this.pendingPhoto) {
-      const photoWaitStart = Date.now();
-      try {
-        prePhoto = await this.pendingPhoto;
-      } catch (error) {
-        console.warn('Pre-captured photo failed:', error);
-      }
-      this.pendingPhoto = null;
-      console.log(`⏱️ [PHOTO-AWAIT] ${Date.now() - photoWaitStart}ms | photo=${prePhoto ? 'yes' : 'no'}`);
+    try {
+      prePhoto = await (this.pendingPhoto ?? Promise.resolve(null));
+    } catch {
+      prePhoto = null;
     }
+    this.pendingPhoto = null;
+    console.log(`⏱️ [PHOTO] photo=${prePhoto ? 'yes' : 'no'}`);
 
     // Bail if session destroyed during photo wait
     if (this.destroyed) {
@@ -292,7 +289,7 @@ export class TranscriptionManager {
 
     try {
       if (this.onQueryReady) {
-        await this.onQueryReady(query, this.activeSpeakerId, prePhoto);
+        await this.onQueryReady(query, this.activeSpeakerId, prePhoto, true);
       }
     } catch (error) {
       console.error('Error processing query:', error);

@@ -50,7 +50,7 @@ export class QueryProcessor {
     this.showStatus("Processing...", hasDisplay);
     lap('PROCESSING-SOUND');
 
-    // Step 1: Use pre-captured photo, or fallback capture (only for visual queries)
+    // Step 1: Always use pre-captured photo, or fallback capture
     let photos: Buffer[] = [];
     let photoDataUrl: string | undefined;
 
@@ -60,9 +60,9 @@ export class QueryProcessor {
         photos = this.user.photo.getPhotosForContext();
         photoDataUrl = `data:${prePhoto.mimeType};base64,${prePhoto.buffer.toString("base64")}`;
         lap('PHOTO-FROM-CACHE');
-      } else if (isVisual) {
-        // Visual query with no pre-photo — fallback capture with 10s timeout
-        console.log(`📸 Visual query but no pre-photo, attempting fallback capture for ${this.user.userId}`);
+      } else {
+        // No pre-photo — fallback capture with 10s timeout
+        console.log(`📸 No pre-photo, attempting fallback capture for ${this.user.userId}`);
         let timeoutId: NodeJS.Timeout;
         const currentPhoto = await Promise.race([
           this.user.photo.takePhoto(),
@@ -76,9 +76,6 @@ export class QueryProcessor {
           console.warn(`📸 Fallback photo capture failed/timed out for ${this.user.userId}`);
         }
         lap('PHOTO-FALLBACK-CAPTURE');
-      } else {
-        // Non-visual query, no pre-photo — skip entirely
-        lap('PHOTO-SKIPPED-NON-VISUAL');
       }
     }
 
@@ -172,9 +169,9 @@ export class QueryProcessor {
       context.hasDisplay
     );
 
-    // Step 7: Stop processing sound loop and output response
+    // Step 7: Stop processing sound loop and output response (fire-and-forget — don't block pipeline)
     this.stopProcessingSound();
-    await this.outputResponse(formattedResponse, context.hasSpeakers, context.hasDisplay);
+    this.outputResponse(formattedResponse, context.hasSpeakers, context.hasDisplay);
     lap('OUTPUT-TO-GLASSES');
 
     // Step 8: Save to chat history
@@ -304,13 +301,11 @@ export class QueryProcessor {
       }
     }
 
-    // Speak if speakers available
+    // Speak if speakers available (fire-and-forget — don't await, it blocks 3-5s)
     if (hasSpeakers) {
-      try {
-        await session.audio.speak(response);
-      } catch (error) {
+      session.audio.speak(response).catch((error) => {
         console.debug("Speech output failed:", error);
-      }
+      });
     }
   }
 }

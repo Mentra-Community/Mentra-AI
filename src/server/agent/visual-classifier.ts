@@ -8,7 +8,7 @@
  */
 
 const GEMINI_API_KEY = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
-const MODEL = "gemini-2.0-flash-lite";
+const MODEL = process.env.LLM_MODEL || "gemini-3.1-flash-lite-preview";
 const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GEMINI_API_KEY}`;
 
 const SYSTEM_PROMPT = `You classify queries from a user wearing smart glasses with a camera. The camera sees whatever the user is looking at.

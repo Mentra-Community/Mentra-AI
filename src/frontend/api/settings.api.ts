@@ -9,7 +9,7 @@ export interface UserSettings {
   createdAt?: string;
   updatedAt?: string;
 }
-
+  
 /**
  * Fetch user settings from the API
  */

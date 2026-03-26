@@ -52,7 +52,7 @@ export async function updateSettings(c: Context) {
     const settings = await UserSettings.findOneAndUpdate(
       { userId },
       { $set: updates },
-      { new: true, upsert: true }
+      { returnDocument: 'after', upsert: true }
     );
 
     return c.json(settings);
