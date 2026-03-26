@@ -137,6 +137,15 @@ export class MentraAI extends AppServer {
         "Mentra AI\n\nWelcome to Mentra AI.\nSay \"Hey Mentra\" followed by your question.",
         { durationMs: 3000 }
       );
+    } else {
+      // Camera-only glasses: play welcome audio after delay
+      if (WELCOME_SOUND_URL) {
+        setTimeout(() => {
+          // session.audio.playAudio({ audioUrl: WELCOME_SOUND_URL }).catch((err) => {
+          //   console.debug("Welcome audio failed:", err);
+          // });
+        }, 1000);
+      }
     }
     //  else { //TODO plays Welcome to Mentra AI for camera glasses removed for now until audio function is stable
     //   // Camera-only glasses: play welcome audio after delay
