@@ -13,6 +13,7 @@ import ColorMiraLogo from '../../public/figma-parth-assets/icons/color-mira-logo
 import Settings from './Settings';
 import Header from '../components/Header';
 import BottomHeader from '../components/BottomHeader';
+import { ChromaticBorder } from '../components/ChromaticBorder';
 import { fetchUserSettings } from '../api/settings.api';
 
 interface Message {
@@ -150,6 +151,7 @@ function ChatInterface({ userId, recipientId, onEnableDebugMode }: ChatInterface
     return sessionStorage.getItem('mentra-session-connected') === 'true';
   });
   const [isProcessing, setIsProcessing] = useState(false);
+  const [wakeWordActive, setWakeWordActive] = useState(false);
   const [thinkingWord, setThinkingWord] = useState(() =>
     THINKING_WORDS[Math.floor(Math.random() * THINKING_WORDS.length)]
   );
@@ -274,12 +276,15 @@ function ChatInterface({ userId, recipientId, onEnableDebugMode }: ChatInterface
                 },
               ]);
             }
+          } else if (data.type === 'wake_word') {
+            setWakeWordActive(true);
           } else if (data.type === 'processing') {
             const randomWord = THINKING_WORDS[Math.floor(Math.random() * THINKING_WORDS.length)];
             setThinkingWord(randomWord);
             setIsProcessing(true);
           } else if (data.type === 'idle') {
             setIsProcessing(false);
+            setWakeWordActive(false);
           } else if (data.type === 'connected') {
             // SSE connected — waiting for history
             setIsLoadingHistory(true);
@@ -393,12 +398,15 @@ function ChatInterface({ userId, recipientId, onEnableDebugMode }: ChatInterface
         )}
       </AnimatePresence>
 
+      {/* RGB Glow Border */}
+      <ChromaticBorder state={wakeWordActive ? "active" : "idle"} />
+
       {/* Main Chat Content */}
       <motion.div
-        className="flex-1 flex flex-col relative"
+        className="flex-1 flex flex-col relative "
         initial={{ x: 0 }}
         animate={{ x: 0 }}
-        style={{ backgroundColor: 'var(--background)' }}
+        style={{ backgroundColor: 'transparent' }}
       >
         {/* Header */}
         <Header

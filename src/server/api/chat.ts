@@ -60,7 +60,7 @@ export function clearPendingEvents(userId: string) {
  * Broadcast a chat event to all clients for a user
  */
 export function broadcastChatEvent(userId: string, event: {
-  type: 'message' | 'processing' | 'idle' | 'history' | 'session_started' | 'session_ended' | 'session_heartbeat' | 'session_reconnecting' | 'session_reconnected';
+  type: 'message' | 'processing' | 'idle' | 'history' | 'session_started' | 'session_ended' | 'session_heartbeat' | 'session_reconnecting' | 'session_reconnected' | 'wake_word';
   [key: string]: unknown;
 }) {
   const clients = chatClients.get(userId);

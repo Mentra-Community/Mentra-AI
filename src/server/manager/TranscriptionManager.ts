@@ -2,6 +2,7 @@ import type { AppSession, TranscriptionData } from "@mentra/sdk";
 import type { User } from "../session/User";
 import type { StoredPhoto } from "./PhotoManager";
 import { detectWakeWord, removeWakeWord, stripWakeWordResidue } from "../utils/wake-word";
+import { broadcastChatEvent } from "../api/chat";
 
 interface SSEWriter {
   write: (data: string) => void;
@@ -145,6 +146,7 @@ export class TranscriptionManager {
 
       // Wake word detected! Start listening
       console.log(`⏱️ [WAKE] Wake word detected: "${text}" (isFinal=${isFinal ?? false})`);
+      broadcastChatEvent(this.user.userId, { type: "wake_word" });
       this.startListening(speakerId);
     }
 
