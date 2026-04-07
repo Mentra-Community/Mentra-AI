@@ -47,7 +47,7 @@ export class PhotoManager {
     }
 
     try {
-      const photo = await session.camera.requestPhoto();
+      const photo = await session.camera.requestPhoto({ sound: false });
 
       const stored: StoredPhoto = {
         requestId: photo.requestId,
