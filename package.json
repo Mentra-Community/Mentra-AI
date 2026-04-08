@@ -22,7 +22,7 @@
     "@googlemaps/google-maps-services-js": "^3.4.2",
     "@mastra/core": "^1.4.0",
     "@mentra/react": "2.1.2",
-    "@mentra/sdk": "3.0.0-hono.6",
+    "@mentra/sdk": "3.0.0-hono.8",
     "@radix-ui/react-scroll-area": "^1.2.2",
     "@radix-ui/react-slot": "^1.1.2",
     "@radix-ui/react-switch": "^1.1.3",
