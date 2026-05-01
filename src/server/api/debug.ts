@@ -1,25 +1,30 @@
 /**
  * Debug API — dev-only endpoints for testing session lifecycle.
+ *
+ * Even in dev mode, the user can only act on their own session — the
+ * id is taken from the authenticated context, not from the request.
  */
 
 import type { Context } from "hono";
 import { sessions } from "../manager/SessionManager";
 import { broadcastChatEvent, clearPendingEvents } from "./chat";
+import { requireAuth } from "../utils/auth";
 
 /**
- * POST /api/debug/kill-session?userId=<id>&mode=soft|hard
+ * POST /api/debug/kill-session?mode=soft|hard
  *
- * Simulates MentraAI.onStop().
+ * Simulates MentraAI.onStop() for the authenticated user.
  * - mode=soft (default): grace period, keeps session alive for 60s
  * - mode=hard: immediate destroy, wipes everything
  */
 export async function killSession(c: Context) {
-  const userId = c.req.query("userId");
+  const userId = requireAuth(c);
+  if (typeof userId !== "string") return userId;
+
   const mode = c.req.query("mode") || "soft";
-  if (!userId) return c.json({ error: "userId is required" }, 400);
 
   const user = sessions.get(userId);
-  if (!user) return c.json({ error: `No session for ${userId}` }, 404);
+  if (!user) return c.json({ error: "No active session" }, 404);
 
   if (mode === "hard") {
     // Hard kill — immediate destroy (old behavior)
@@ -34,7 +39,7 @@ export async function killSession(c: Context) {
     return c.json({
       success: true,
       mode: "hard",
-      message: `Session hard-killed for ${userId}`,
+      message: "Session hard-killed",
     });
   }
 
@@ -49,6 +54,6 @@ export async function killSession(c: Context) {
   return c.json({
     success: true,
     mode: "soft",
-    message: `Session soft-killed for ${userId} (60s grace period)`,
+    message: "Session soft-killed (60s grace period)",
   });
 }

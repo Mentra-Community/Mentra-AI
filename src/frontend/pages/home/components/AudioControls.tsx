@@ -1,13 +1,15 @@
 import { useState } from "react";
+import { useMentraAuth } from "@mentra/react";
 import { Mic } from "lucide-react";
 import { Card, Button, Input } from "../../../components/ui";
+import { createAuthFetch } from "../../../lib/authFetch";
 
 interface AudioControlsProps {
-  userId: string;
   onLog: (message: string) => void;
 }
 
-export function AudioControls({ userId, onLog }: AudioControlsProps) {
+export function AudioControls({ onLog }: AudioControlsProps) {
+  const { frontendToken } = useMentraAuth();
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speakText, setSpeakText] = useState("");
 
@@ -18,10 +20,11 @@ export function AudioControls({ userId, onLog }: AudioControlsProps) {
     }
 
     try {
-      const response = await fetch("/api/speak", {
+      const authFetch = createAuthFetch(frontendToken);
+      const response = await authFetch("/api/speak", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: speakText, userId }),
+        body: JSON.stringify({ text: speakText }),
       });
 
       const data = await response.json();

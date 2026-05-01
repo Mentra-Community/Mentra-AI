@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, memo } from 'react';
+import { useMentraAuth } from '@mentra/react';
 import { X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { withAuthSseUrl } from '../lib/authFetch';
 // @ts-ignore - Bun bundler doesn't resolve `export { X as default }` re-exports correctly
 import LottieImport from 'lottie-react';
 const Lottie: typeof LottieImport = (LottieImport as any)?.default ?? LottieImport;
@@ -145,6 +147,7 @@ const ChatBubble = memo(function ChatBubble({
  * ChatInterface component - Beautiful dark-themed chat UI
  */
 function ChatInterface({ userId, recipientId, onEnableDebugMode }: ChatInterfaceProps) {
+  const { frontendToken } = useMentraAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [hasConnectedBefore] = useState(() => {
     return sessionStorage.getItem('mentra-session-connected') === 'true';
@@ -209,7 +212,7 @@ function ChatInterface({ userId, recipientId, onEnableDebugMode }: ChatInterface
   // Load user settings on mount
   useEffect(() => {
     if (userId) {
-      fetchUserSettings(userId)
+      fetchUserSettings(frontendToken)
         .then((settings) => {
           setChatHistoryEnabled(settings.chatHistoryEnabled ?? false);
         })
@@ -217,7 +220,7 @@ function ChatInterface({ userId, recipientId, onEnableDebugMode }: ChatInterface
           console.error('[ChatInterface] Failed to fetch user settings:', error);
         });
     }
-  }, [userId]);
+  }, [userId, frontendToken]);
 
   // Set up SSE connection for real-time updates (with auto-reconnect)
   useEffect(() => {
@@ -230,7 +233,10 @@ function ChatInterface({ userId, recipientId, onEnableDebugMode }: ChatInterface
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
     const connect = () => {
-      const sseUrl = `/api/chat/stream?userId=${encodeURIComponent(userId)}&recipientId=${encodeURIComponent(recipientId)}`;
+      const sseUrl = withAuthSseUrl(
+        `/api/chat/stream?recipientId=${encodeURIComponent(recipientId)}`,
+        frontendToken,
+      );
       const eventSource = new EventSource(sseUrl);
       sseRef.current = eventSource;
 
@@ -353,7 +359,7 @@ function ChatInterface({ userId, recipientId, onEnableDebugMode }: ChatInterface
       if (reconnectTimer) clearTimeout(reconnectTimer);
       sseRef.current?.close();
     };
-  }, [userId, recipientId]);
+  }, [userId, recipientId, frontendToken]);
 
   // Render Settings page if on settings
   if (currentPage === 'settings') {
@@ -362,7 +368,6 @@ function ChatInterface({ userId, recipientId, onEnableDebugMode }: ChatInterface
         onBack={() => setCurrentPage('chat')}
         isDarkMode={isDarkMode}
         onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
-        userId={userId}
         onChatHistoryToggle={(enabled) => setChatHistoryEnabled(enabled)}
         onEnableDebugMode={onEnableDebugMode}
       />

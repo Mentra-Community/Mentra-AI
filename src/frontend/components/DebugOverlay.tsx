@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useMentraAuth } from '@mentra/react';
+import { withAuthSseUrl } from '../lib/authFetch';
 
 interface TranscriptionEntry {
   id: number;
@@ -8,11 +10,11 @@ interface TranscriptionEntry {
 }
 
 interface DebugOverlayProps {
-  userId: string;
   onClose: () => void;
 }
 
-export function DebugOverlay({ userId, onClose }: DebugOverlayProps) {
+export function DebugOverlay({ onClose }: DebugOverlayProps) {
+  const { frontendToken } = useMentraAuth();
   const [entries, setEntries] = useState<TranscriptionEntry[]>([]);
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -33,7 +35,7 @@ export function DebugOverlay({ userId, onClose }: DebugOverlayProps) {
   useEffect(() => {
     const connect = () => {
       const es = new EventSource(
-        `/api/transcription-stream?userId=${encodeURIComponent(userId)}`
+        withAuthSseUrl('/api/transcription-stream', frontendToken),
       );
       eventSourceRef.current = es;
 
@@ -82,7 +84,7 @@ export function DebugOverlay({ userId, onClose }: DebugOverlayProps) {
       eventSourceRef.current?.close();
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
     };
-  }, [userId]);
+  }, [frontendToken]);
 
   // Touch drag handlers
   const handleTouchStart = useCallback((e: React.TouchEvent) => {

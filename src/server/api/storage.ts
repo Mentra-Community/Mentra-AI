@@ -1,20 +1,20 @@
 import type { Context } from "hono";
 import { sessions } from "../manager/SessionManager";
+import { requireAuth } from "../utils/auth";
 
 /** GET /theme-preference */
 export async function getThemePreference(c: Context) {
-  const userId = c.req.query("userId");
-
-  if (!userId) return c.json({ error: "userId is required" }, 400);
+  const userId = requireAuth(c);
+  if (typeof userId !== "string") return userId;
 
   const user = sessions.get(userId);
   if (!user?.appSession) {
-    return c.json({ error: `No active session for user ${userId}` }, 404);
+    return c.json({ error: "No active session" }, 404);
   }
 
   try {
     const theme = await user.storage.getTheme();
-    return c.json({ theme, userId });
+    return c.json({ theme });
   } catch (error: any) {
     return c.json({ error: error.message }, 500);
   }
@@ -22,21 +22,22 @@ export async function getThemePreference(c: Context) {
 
 /** POST /theme-preference */
 export async function setThemePreference(c: Context) {
-  const { userId, theme } = await c.req.json();
+  const userId = requireAuth(c);
+  if (typeof userId !== "string") return userId;
 
-  if (!userId) return c.json({ error: "userId is required" }, 400);
+  const { theme } = await c.req.json();
   if (!theme || (theme !== "dark" && theme !== "light")) {
     return c.json({ error: 'theme must be "dark" or "light"' }, 400);
   }
 
   const user = sessions.get(userId);
   if (!user?.appSession) {
-    return c.json({ error: `No active session for user ${userId}` }, 404);
+    return c.json({ error: "No active session" }, 404);
   }
 
   try {
     await user.storage.setTheme(theme);
-    return c.json({ success: true, theme, userId });
+    return c.json({ success: true, theme });
   } catch (error: any) {
     return c.json({ error: error.message }, 500);
   }
