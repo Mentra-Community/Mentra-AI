@@ -4,7 +4,9 @@
   "type": "module",
   "module": "src/index.ts",
   "scripts": {
-    "dev": "lsof -ti:3000 | xargs kill -9 2>/dev/null; ngrok http --domain=general.dev.tpa.ngrok.app 3000 &>/dev/null & NODE_ENV=development bun --watch src/index.ts",
+    "dev": "NODE_ENV=development bun --watch src/index.ts",
+    "ngrok": "ngrok http 3000 --url https://general.dev.tpa.ngrok.app",
+    "ngrok-isaiah": "ngrok http 3000 --url https://isaiah-tpa.ngrok.app",
     "start": "bun src/index.ts",
     "test:visual": "bun test ./src/server/test/visual/visual-classifier.test.ts",
     "test:visual:easy": "EVAL_DIFFICULTY=easy bun test ./src/server/test/visual/visual-classifier.test.ts",

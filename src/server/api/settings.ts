@@ -2,26 +2,26 @@
  * User Settings API
  *
  * Handles user settings like theme and chat history preferences.
+ * The user id always comes from the authenticated context. Auth
+ * is enforced at the sub-app level (see routes.ts), so handlers
+ * read c.get("userId") directly.
+ *
+ * These routes work whether or not glasses are currently
+ * connected, so they live on the auth-only sub-app rather than
+ * the session sub-app.
  */
 
-import type { Context } from "hono";
+import type { AuthContext } from "../utils/auth";
 import { UserSettings } from "../db/schemas/user-settings.schema";
 
-/**
- * Get user settings
- */
-export async function getSettings(c: Context) {
-  const userId = c.req.query("userId");
-
-  if (!userId) {
-    return c.json({ error: "userId is required" }, 400);
-  }
+/** GET /settings */
+export async function getSettings(c: AuthContext) {
+  const userId = c.get("userId");
 
   try {
     let settings = await UserSettings.findOne({ userId });
 
     if (!settings) {
-      // Create default settings if not found
       settings = await UserSettings.create({
         userId,
         theme: "dark",
@@ -36,23 +36,19 @@ export async function getSettings(c: Context) {
   }
 }
 
-/**
- * Update user settings (partial update)
- */
-export async function updateSettings(c: Context) {
+/** PATCH /settings */
+export async function updateSettings(c: AuthContext) {
+  const userId = c.get("userId");
+
   try {
     const body = await c.req.json();
-    const { userId, ...updates } = body;
+    // Strip any client-supplied userId. The authenticated id always wins.
+    const { userId: _ignored, ...updates } = body;
 
-    if (!userId) {
-      return c.json({ error: "userId is required" }, 400);
-    }
-
-    // Find and update, or create if not exists
     const settings = await UserSettings.findOneAndUpdate(
       { userId },
       { $set: updates },
-      { returnDocument: 'after', upsert: true }
+      { returnDocument: "after", upsert: true },
     );
 
     return c.json(settings);

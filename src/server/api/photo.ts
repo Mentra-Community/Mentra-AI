@@ -1,44 +1,33 @@
-import type { Context } from "hono";
-import { sessions } from "../manager/SessionManager";
+import type { SessionContext } from "../utils/auth";
 
-/** GET /latest-photo — metadata for the most recent photo */
-export function getLatestPhoto(c: Context) {
-  const userId = c.req.query("userId");
-
-  if (!userId) return c.json({ error: "userId is required" }, 400);
-
-  const user = sessions.get(userId);
-  if (!user) return c.json({ error: "No photos available for this user" }, 404);
+/** GET /latest-photo: metadata for the most recent photo */
+export function getLatestPhoto(c: SessionContext) {
+  const user = c.get("user");
 
   const photos = user.photo.getAll();
   if (photos.length === 0) {
-    return c.json({ error: "No photos available for this user" }, 404);
+    return c.json({ error: "No photos available" }, 404);
   }
 
   const latest = photos[0];
   return c.json({
     requestId: latest.requestId,
     timestamp: latest.timestamp.getTime(),
-    userId: latest.userId,
     hasPhoto: true,
   });
 }
 
-/** GET /photo/:requestId — raw photo image data */
-export function getPhotoData(c: Context) {
+/** GET /photo/:requestId: raw photo image data */
+export function getPhotoData(c: SessionContext) {
+  const user = c.get("user");
+  const userId = c.get("userId");
+
   const requestId = c.req.param("requestId");
-  const userId = c.req.query("userId");
+  if (!requestId) return c.json({ error: "Photo not found" }, 404);
 
-  if (!userId) return c.json({ error: "userId is required" }, 400);
-
-  const user = sessions.get(userId);
-  const photo = user?.photo.getPhoto(requestId);
-  if (!photo) return c.json({ error: "Photo not found" }, 404);
-  if (photo.userId !== userId) {
-    return c.json(
-      { error: "Access denied: photo belongs to different user" },
-      403,
-    );
+  const photo = user.photo.getPhoto(requestId);
+  if (!photo || photo.userId !== userId) {
+    return c.json({ error: "Photo not found" }, 404);
   }
 
   return new Response(new Uint8Array(photo.buffer), {
@@ -49,21 +38,17 @@ export function getPhotoData(c: Context) {
   });
 }
 
-/** GET /photo-base64/:requestId — photo as base64 JSON */
-export function getPhotoBase64(c: Context) {
+/** GET /photo-base64/:requestId: photo as base64 JSON */
+export function getPhotoBase64(c: SessionContext) {
+  const user = c.get("user");
+  const userId = c.get("userId");
+
   const requestId = c.req.param("requestId");
-  const userId = c.req.query("userId");
+  if (!requestId) return c.json({ error: "Photo not found" }, 404);
 
-  if (!userId) return c.json({ error: "userId is required" }, 400);
-
-  const user = sessions.get(userId);
-  const photo = user?.photo.getPhoto(requestId);
-  if (!photo) return c.json({ error: "Photo not found" }, 404);
-  if (photo.userId !== userId) {
-    return c.json(
-      { error: "Access denied: photo belongs to different user" },
-      403,
-    );
+  const photo = user.photo.getPhoto(requestId);
+  if (!photo || photo.userId !== userId) {
+    return c.json({ error: "Photo not found" }, 404);
   }
 
   const base64Data = photo.buffer.toString("base64");
@@ -73,7 +58,6 @@ export function getPhotoBase64(c: Context) {
     mimeType: photo.mimeType,
     filename: photo.filename,
     size: photo.size,
-    userId: photo.userId,
     base64: base64Data,
     dataUrl: `data:${photo.mimeType};base64,${base64Data}`,
   });

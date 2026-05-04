@@ -1,4 +1,8 @@
 // API functions for user settings
+// All requests authenticate via the MentraOS frontend token. The
+// authenticated user id is derived server-side from c.get("authUserId").
+
+import { createAuthFetch } from "../lib/authFetch";
 
 const getApiUrl = () => window.location.origin;
 
@@ -9,13 +13,16 @@ export interface UserSettings {
   createdAt?: string;
   updatedAt?: string;
 }
-  
+
 /**
  * Fetch user settings from the API
  */
-export const fetchUserSettings = async (userId: string): Promise<UserSettings> => {
+export const fetchUserSettings = async (
+  frontendToken: string | null,
+): Promise<UserSettings> => {
   const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/settings?userId=${encodeURIComponent(userId)}`);
+  const authFetch = createAuthFetch(frontendToken);
+  const response = await authFetch(`${apiUrl}/api/settings`);
 
   if (!response.ok) {
     throw new Error('Failed to fetch settings');
@@ -28,14 +35,15 @@ export const fetchUserSettings = async (userId: string): Promise<UserSettings> =
  * Update user settings (partial update)
  */
 export const updateUserSettings = async (
-  userId: string,
-  updates: Partial<Omit<UserSettings, 'userId' | 'createdAt' | 'updatedAt'>>
+  frontendToken: string | null,
+  updates: Partial<Omit<UserSettings, 'userId' | 'createdAt' | 'updatedAt'>>,
 ): Promise<UserSettings> => {
   const apiUrl = getApiUrl();
-  const response = await fetch(`${apiUrl}/api/settings`, {
+  const authFetch = createAuthFetch(frontendToken);
+  const response = await authFetch(`${apiUrl}/api/settings`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId, ...updates }),
+    body: JSON.stringify(updates),
   });
 
   if (!response.ok) {
@@ -49,18 +57,18 @@ export const updateUserSettings = async (
  * Update only the theme setting
  */
 export const updateTheme = async (
-  userId: string,
-  theme: 'light' | 'dark'
+  frontendToken: string | null,
+  theme: 'light' | 'dark',
 ): Promise<UserSettings> => {
-  return updateUserSettings(userId, { theme });
+  return updateUserSettings(frontendToken, { theme });
 };
 
 /**
  * Update only the chatHistoryEnabled setting
  */
 export const updateChatHistoryEnabled = async (
-  userId: string,
-  chatHistoryEnabled: boolean
+  frontendToken: string | null,
+  chatHistoryEnabled: boolean,
 ): Promise<UserSettings> => {
-  return updateUserSettings(userId, { chatHistoryEnabled });
+  return updateUserSettings(frontendToken, { chatHistoryEnabled });
 };

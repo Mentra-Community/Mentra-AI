@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
+import { useMentraAuth } from '@mentra/react';
 import { motion } from 'framer-motion';
 import Header from '../components/Header';
 import SettingItem from '../ui/setting-item';
@@ -10,7 +11,6 @@ interface SettingsProps {
   onBack: () => void;
   isDarkMode: boolean;
   onToggleDarkMode: () => void;
-  userId: string;
   onChatHistoryToggle?: (enabled: boolean) => void;
   onEnableDebugMode?: () => void;
 }
@@ -38,10 +38,10 @@ function Settings({
   onBack,
   isDarkMode,
   onToggleDarkMode,
-  userId,
   onChatHistoryToggle,
   onEnableDebugMode,
 }: SettingsProps) {
+  const { frontendToken } = useMentraAuth();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const [chatHistoryEnabled, setChatHistoryEnabled] = useState(false);
   const [isLoadingSettings, setIsLoadingSettings] = useState(true);
@@ -64,7 +64,7 @@ function Settings({
   useEffect(() => {
     const loadSettings = async () => {
       try {
-        const settings = await fetchUserSettings(userId);
+        const settings = await fetchUserSettings(frontendToken);
         setChatHistoryEnabled(settings.chatHistoryEnabled ?? false);
       } catch (error) {
         console.error('Failed to load settings:', error);
@@ -73,7 +73,7 @@ function Settings({
       }
     };
     loadSettings();
-  }, [userId]);
+  }, [frontendToken]);
 
   // Handle chat history toggle
   const handleChatHistoryToggle = async () => {
@@ -81,7 +81,7 @@ function Settings({
     setChatHistoryEnabled(newValue);
 
     try {
-      await updateChatHistoryEnabled(userId, newValue);
+      await updateChatHistoryEnabled(frontendToken, newValue);
       console.log('Chat history setting synced:', newValue);
       onChatHistoryToggle?.(newValue);
     } catch (error) {
@@ -96,7 +96,7 @@ function Settings({
     onToggleDarkMode();
 
     try {
-      await updateTheme(userId, newTheme);
+      await updateTheme(frontendToken, newTheme);
       console.log('Theme synced:', newTheme);
     } catch (error) {
       console.error('Failed to update theme:', error);

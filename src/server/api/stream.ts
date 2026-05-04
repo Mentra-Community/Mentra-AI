@@ -1,14 +1,11 @@
-import type { Context } from "hono";
 import { streamSSE } from "hono/streaming";
-import { sessions } from "../manager/SessionManager";
 
-/** GET /photo-stream — SSE for real-time photo updates */
-export function photoStream(c: Context) {
-  const userId = c.req.query("userId");
-  if (!userId) return c.json({ error: "userId is required" }, 400);
+import type { SessionContext } from "../utils/auth";
 
-  const user = sessions.get(userId);
-  if (!user) return c.json({ error: `No user for ${userId}` }, 404);
+/** GET /photo-stream: SSE for real-time photo updates */
+export function photoStream(c: SessionContext) {
+  const user = c.get("user");
+  const userId = c.get("userId");
 
   console.log(`[SSE Photo] Client connected for user: ${userId}`);
 
@@ -22,7 +19,7 @@ export function photoStream(c: Context) {
     user.photo.addSSEClient(client);
 
     await stream.writeSSE({
-      data: JSON.stringify({ type: "connected", userId }),
+      data: JSON.stringify({ type: "connected" }),
     });
 
     // Send existing photos
@@ -35,7 +32,6 @@ export function photoStream(c: Context) {
           mimeType: photo.mimeType,
           filename: photo.filename,
           size: photo.size,
-          userId: photo.userId,
           base64: base64Data,
           dataUrl: `data:${photo.mimeType};base64,${base64Data}`,
         }),
@@ -58,13 +54,10 @@ export function photoStream(c: Context) {
   });
 }
 
-/** GET /transcription-stream — SSE for real-time transcriptions */
-export function transcriptionStream(c: Context) {
-  const userId = c.req.query("userId");
-  if (!userId) return c.json({ error: "userId is required" }, 400);
-
-  const user = sessions.get(userId);
-  if (!user) return c.json({ error: `No user for ${userId}` }, 404);
+/** GET /transcription-stream: SSE for real-time transcriptions */
+export function transcriptionStream(c: SessionContext) {
+  const user = c.get("user");
+  const userId = c.get("userId");
 
   console.log(`[SSE Transcription] Client connected for user: ${userId}`);
 
@@ -78,7 +71,7 @@ export function transcriptionStream(c: Context) {
     user.transcription.addSSEClient(client);
 
     await stream.writeSSE({
-      data: JSON.stringify({ type: "connected", userId }),
+      data: JSON.stringify({ type: "connected" }),
     });
 
     stream.onAbort(() => {

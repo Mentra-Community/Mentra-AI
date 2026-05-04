@@ -1,28 +1,28 @@
 /**
- * Debug API — dev-only endpoints for testing session lifecycle.
+ * Debug API
+ *
+ * Dev-only endpoints for testing session lifecycle. Mounted on
+ * the session sub-app, so a valid auth token AND a live User are
+ * required just like any other route there.
  */
 
-import type { Context } from "hono";
 import { sessions } from "../manager/SessionManager";
+import type { SessionContext } from "../utils/auth";
+
 import { broadcastChatEvent, clearPendingEvents } from "./chat";
 
 /**
- * POST /api/debug/kill-session?userId=<id>&mode=soft|hard
+ * POST /api/debug/kill-session?mode=soft|hard
  *
- * Simulates MentraAI.onStop().
+ * Simulates MentraAI.onStop() for the authenticated user.
  * - mode=soft (default): grace period, keeps session alive for 60s
  * - mode=hard: immediate destroy, wipes everything
  */
-export async function killSession(c: Context) {
-  const userId = c.req.query("userId");
+export async function killSession(c: SessionContext) {
+  const userId = c.get("userId");
   const mode = c.req.query("mode") || "soft";
-  if (!userId) return c.json({ error: "userId is required" }, 400);
-
-  const user = sessions.get(userId);
-  if (!user) return c.json({ error: `No session for ${userId}` }, 404);
 
   if (mode === "hard") {
-    // Hard kill — immediate destroy (old behavior)
     broadcastChatEvent(userId, {
       type: "session_ended",
       reason: "debug-hard-kill",
@@ -34,11 +34,11 @@ export async function killSession(c: Context) {
     return c.json({
       success: true,
       mode: "hard",
-      message: `Session hard-killed for ${userId}`,
+      message: "Session hard-killed",
     });
   }
 
-  // Soft kill — grace period (matches real onStop behavior)
+  // Soft kill: grace period (matches real onStop behavior)
   broadcastChatEvent(userId, {
     type: "session_reconnecting",
     reason: "debug-soft-kill",
@@ -49,6 +49,6 @@ export async function killSession(c: Context) {
   return c.json({
     success: true,
     mode: "soft",
-    message: `Session soft-killed for ${userId} (60s grace period)`,
+    message: "Session soft-killed (60s grace period)",
   });
 }

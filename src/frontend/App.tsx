@@ -3,6 +3,7 @@ import { useMentraAuth } from '@mentra/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ChatInterface from './pages/ChatInterface';
 import { DebugOverlay } from './components/DebugOverlay';
+import { createAuthFetch } from './lib/authFetch';
 
 // Theme Context
 interface ThemeContextValue {
@@ -22,7 +23,7 @@ export function useTheme() {
 }
 
 export default function App() {
-  const { userId, isLoading, error, isAuthenticated } = useMentraAuth();
+  const { userId, frontendToken, isLoading, error, isAuthenticated } = useMentraAuth();
 
   // Theme state with localStorage persistence
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -49,7 +50,8 @@ export default function App() {
   // Sync theme with backend when user authenticates
   useEffect(() => {
     if (isAuthenticated && userId) {
-      fetch(`/api/settings?userId=${encodeURIComponent(userId)}`)
+      const authFetch = createAuthFetch(frontendToken);
+      authFetch('/api/settings')
         .then((res) => res.json())
         .then((data) => {
           if (data.theme === 'dark' || data.theme === 'light') {
@@ -59,18 +61,19 @@ export default function App() {
         })
         .catch(() => {});
     }
-  }, [isAuthenticated, userId]);
+  }, [isAuthenticated, userId, frontendToken]);
 
   // Save theme to backend on change
   useEffect(() => {
     if (isAuthenticated && userId) {
-      fetch('/api/settings', {
+      const authFetch = createAuthFetch(frontendToken);
+      authFetch('/api/settings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, theme }),
+        body: JSON.stringify({ theme }),
       }).catch(() => {});
     }
-  }, [theme, isAuthenticated, userId]);
+  }, [theme, isAuthenticated, userId, frontendToken]);
 
   // Debug mode state with localStorage persistence
   const [debugMode, setDebugMode] = useState(() => {
@@ -144,7 +147,7 @@ export default function App() {
 
         {/* Debug overlay — rendered outside ChatInterface so it appears on all pages */}
         {debugMode && userId && (
-          <DebugOverlay userId={userId} onClose={disableDebugMode} />
+          <DebugOverlay onClose={disableDebugMode} />
         )}
 
         {/* Debug toast */}
