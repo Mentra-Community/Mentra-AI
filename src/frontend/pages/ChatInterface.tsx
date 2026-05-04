@@ -222,9 +222,12 @@ function ChatInterface({ userId, recipientId, onEnableDebugMode }: ChatInterface
     }
   }, [userId, frontendToken]);
 
-  // Set up SSE connection for real-time updates (with auto-reconnect)
+  // Set up SSE connection for real-time updates (with auto-reconnect).
+  // Wait for the frontend token before connecting; otherwise the stream
+  // hits a 401 immediately and triggers the reconnect loop while
+  // useMentraAuth() is still resolving.
   useEffect(() => {
-    if (!userId || !recipientId) {
+    if (!userId || !recipientId || !frontendToken) {
       return;
     }
 

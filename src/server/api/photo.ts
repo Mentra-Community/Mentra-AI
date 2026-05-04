@@ -1,11 +1,9 @@
 import type { Context } from "hono";
 import { sessions } from "../manager/SessionManager";
-import { requireAuth } from "../utils/auth";
 
 /** GET /latest-photo — metadata for the most recent photo */
 export function getLatestPhoto(c: Context) {
-  const userId = requireAuth(c);
-  if (typeof userId !== "string") return userId;
+  const userId = c.get("authUserId") as string;
 
   const user = sessions.get(userId);
   if (!user) return c.json({ error: "No photos available" }, 404);
@@ -25,8 +23,7 @@ export function getLatestPhoto(c: Context) {
 
 /** GET /photo/:requestId — raw photo image data */
 export function getPhotoData(c: Context) {
-  const userId = requireAuth(c);
-  if (typeof userId !== "string") return userId;
+  const userId = c.get("authUserId") as string;
 
   const requestId = c.req.param("requestId");
   if (!requestId) return c.json({ error: "Photo not found" }, 404);
@@ -47,8 +44,7 @@ export function getPhotoData(c: Context) {
 
 /** GET /photo-base64/:requestId — photo as base64 JSON */
 export function getPhotoBase64(c: Context) {
-  const userId = requireAuth(c);
-  if (typeof userId !== "string") return userId;
+  const userId = c.get("authUserId") as string;
 
   const requestId = c.req.param("requestId");
   if (!requestId) return c.json({ error: "Photo not found" }, 404);

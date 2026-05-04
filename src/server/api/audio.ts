@@ -1,11 +1,9 @@
 import type { Context } from "hono";
 import { sessions } from "../manager/SessionManager";
-import { requireAuth } from "../utils/auth";
 
 /** POST /speak — text-to-speech on the glasses */
 export async function speak(c: Context) {
-  const userId = requireAuth(c);
-  if (typeof userId !== "string") return userId;
+  const userId = c.get("authUserId") as string;
 
   const { text } = await c.req.json();
   if (!text) return c.json({ error: "text is required" }, 400);
@@ -25,8 +23,7 @@ export async function speak(c: Context) {
 
 /** POST /stop-audio — stop audio playback */
 export async function stopAudio(c: Context) {
-  const userId = requireAuth(c);
-  if (typeof userId !== "string") return userId;
+  const userId = c.get("authUserId") as string;
 
   const user = sessions.get(userId);
   if (!user?.appSession) {

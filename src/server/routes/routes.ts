@@ -1,11 +1,20 @@
 /**
  * API Route Definitions
  *
- * Maps HTTP methods + paths to handler functions.
- * Each handler lives in its own file under api/.
+ * Two sub-apps are mounted at `/api`:
+ *
+ *   publicApi    routes that are reachable without auth
+ *   protectedApi routes gated by `requireAuthMiddleware`
+ *
+ * New routes default to authenticated by being registered on
+ * `protectedApi`. Public routes are deliberate and listed in one
+ * place so the surface is easy to audit. See
+ * issues/auth-by-default for the rationale.
  */
 
 import { Hono } from "hono";
+import type { AuthVariables } from "@mentra/sdk";
+
 import { getHealth } from "../api/health";
 import { photoStream, transcriptionStream } from "../api/stream";
 import { speak, stopAudio } from "../api/audio";
@@ -14,45 +23,64 @@ import { getLatestPhoto, getPhotoData, getPhotoBase64 } from "../api/photo";
 import { getSettings, updateSettings } from "../api/settings";
 import { chatStream } from "../api/chat";
 import { killSession } from "../api/debug";
+import { requireAuthMiddleware } from "../utils/auth";
 
-export const api = new Hono();
-
-// Health
-api.get("/health", getHealth);
-
-// SSE streams — disable proxy buffering so Nginx/ingress forwards data immediately.
-// Without this, heartbeats get stuck in Nginx's response buffer and the proxy
-// considers the connection idle after its read timeout (~60s), killing the SSE.
+// SSE streams need proxy buffering disabled so Nginx/ingress forwards
+// data immediately. Without this, heartbeats get stuck in Nginx's
+// response buffer and the proxy considers the connection idle after
+// its read timeout (~60s), killing the SSE.
 const sseHeaders = async (c: any, next: any) => {
   c.header("X-Accel-Buffering", "no");
   c.header("Cache-Control", "no-cache, no-transform");
   await next();
 };
-api.use("/photo-stream", sseHeaders);
-api.use("/transcription-stream", sseHeaders);
-api.use("/chat/stream", sseHeaders);
-api.get("/photo-stream", photoStream);
-api.get("/transcription-stream", transcriptionStream);
-api.get("/chat/stream", chatStream);
+
+// ── Public routes ──────────────────────────────────────────────────
+//
+// Reachable without an auth token. Keep this list short and
+// deliberate. Anything that touches user state belongs on
+// protectedApi.
+
+const publicApi = new Hono();
+publicApi.get("/health", getHealth);
+
+// ── Protected routes ───────────────────────────────────────────────
+//
+// Every route below this point is gated by requireAuthMiddleware.
+// Inside handlers, c.get("authUserId") is guaranteed to be set.
+
+const protectedApi = new Hono<{ Variables: AuthVariables }>();
+protectedApi.use("*", requireAuthMiddleware);
+
+protectedApi.use("/photo-stream", sseHeaders);
+protectedApi.use("/transcription-stream", sseHeaders);
+protectedApi.use("/chat/stream", sseHeaders);
+protectedApi.get("/photo-stream", photoStream);
+protectedApi.get("/transcription-stream", transcriptionStream);
+protectedApi.get("/chat/stream", chatStream);
 
 // Audio
-api.post("/speak", speak);
-api.post("/stop-audio", stopAudio);
+protectedApi.post("/speak", speak);
+protectedApi.post("/stop-audio", stopAudio);
 
 // Storage / preferences
-api.get("/theme-preference", getThemePreference);
-api.post("/theme-preference", setThemePreference);
+protectedApi.get("/theme-preference", getThemePreference);
+protectedApi.post("/theme-preference", setThemePreference);
 
 // User settings
-api.get("/settings", getSettings);
-api.patch("/settings", updateSettings);
+protectedApi.get("/settings", getSettings);
+protectedApi.patch("/settings", updateSettings);
 
 // Photos
-api.get("/latest-photo", getLatestPhoto);
-api.get("/photo/:requestId", getPhotoData);
-api.get("/photo-base64/:requestId", getPhotoBase64);
+protectedApi.get("/latest-photo", getLatestPhoto);
+protectedApi.get("/photo/:requestId", getPhotoData);
+protectedApi.get("/photo-base64/:requestId", getPhotoBase64);
 
-// Debug (dev only)
+// Debug (dev only). Still requires auth, just like every other route.
 if (process.env.NODE_ENV === "development") {
-  api.post("/debug/kill-session", killSession);
+  protectedApi.post("/debug/kill-session", killSession);
 }
+
+export const api = new Hono();
+api.route("/", publicApi);
+api.route("/", protectedApi);

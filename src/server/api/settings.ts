@@ -2,20 +2,19 @@
  * User Settings API
  *
  * Handles user settings like theme and chat history preferences.
- * The user id is always taken from the authenticated context, never
- * from request input.
+ * The user id always comes from the authenticated context. Auth is
+ * enforced at the sub-app level (see routes.ts), so handlers can
+ * read c.get("authUserId") directly.
  */
 
 import type { Context } from "hono";
 import { UserSettings } from "../db/schemas/user-settings.schema";
-import { requireAuth } from "../utils/auth";
 
 /**
  * Get user settings
  */
 export async function getSettings(c: Context) {
-  const userId = requireAuth(c);
-  if (typeof userId !== "string") return userId;
+  const userId = c.get("authUserId") as string;
 
   try {
     let settings = await UserSettings.findOne({ userId });
@@ -40,19 +39,17 @@ export async function getSettings(c: Context) {
  * Update user settings (partial update)
  */
 export async function updateSettings(c: Context) {
-  const userId = requireAuth(c);
-  if (typeof userId !== "string") return userId;
+  const userId = c.get("authUserId") as string;
 
   try {
     const body = await c.req.json();
-    // Strip any client-supplied userId — the authenticated id always wins.
+    // Strip any client-supplied userId. The authenticated id always wins.
     const { userId: _ignored, ...updates } = body;
 
-    // Find and update, or create if not exists
     const settings = await UserSettings.findOneAndUpdate(
       { userId },
       { $set: updates },
-      { returnDocument: 'after', upsert: true }
+      { returnDocument: "after", upsert: true },
     );
 
     return c.json(settings);

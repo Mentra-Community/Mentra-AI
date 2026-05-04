@@ -1,5 +1,5 @@
 /**
- * authFetch — authenticated fetch wrapper.
+ * authFetch: authenticated fetch wrapper.
  *
  * Attaches the MentraOS frontendToken as a Bearer token on every
  * request so the SDK auth middleware can identify the user via
@@ -14,7 +14,19 @@ export function createAuthFetch(frontendToken: string | null) {
     input: string | URL | Request,
     init?: RequestInit,
   ): Promise<Response> {
-    const headers = new Headers(init?.headers);
+    // When `input` is a Request, its headers are part of the request
+    // and would otherwise be lost since fetch(Request, init) lets
+    // init.headers replace them entirely. Seed from the Request's
+    // headers first, then layer init.headers on top, then add the
+    // bearer last so it always wins.
+    const headers = new Headers(
+      input instanceof Request ? input.headers : undefined,
+    );
+    if (init?.headers) {
+      new Headers(init.headers).forEach((value, key) => {
+        headers.set(key, value);
+      });
+    }
 
     if (frontendToken) {
       headers.set("Authorization", `Bearer ${frontendToken}`);

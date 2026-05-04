@@ -1,12 +1,10 @@
 import type { Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import { sessions } from "../manager/SessionManager";
-import { requireAuth } from "../utils/auth";
 
 /** GET /photo-stream — SSE for real-time photo updates */
 export function photoStream(c: Context) {
-  const userId = requireAuth(c);
-  if (typeof userId !== "string") return userId;
+  const userId = c.get("authUserId") as string;
 
   const user = sessions.get(userId);
   if (!user) return c.json({ error: "No active session" }, 404);
@@ -60,8 +58,7 @@ export function photoStream(c: Context) {
 
 /** GET /transcription-stream — SSE for real-time transcriptions */
 export function transcriptionStream(c: Context) {
-  const userId = requireAuth(c);
-  if (typeof userId !== "string") return userId;
+  const userId = c.get("authUserId") as string;
 
   const user = sessions.get(userId);
   if (!user) return c.json({ error: "No active session" }, 404);

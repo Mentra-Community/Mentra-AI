@@ -3,31 +3,31 @@
  *
  * The MentraOS AppServer base class auto-applies `createAuthMiddleware`
  * across all routes. After it runs, the authenticated user id is
- * available via `c.get("authUserId")` on every handler. These helpers
- * centralize the unauthorized response so route handlers don't each
- * re-implement the check.
+ * available via `c.get("authUserId")` on every handler. The middleware
+ * itself does not 401 on a missing token; it just leaves the context
+ * variable unset.
  *
- * Always pull the user id from the authenticated context — never trust
- * a userId passed in the query string or request body.
+ * To make routes fail closed by default, this module exports
+ * `requireAuthMiddleware`, mounted on the protected sub-app in
+ * routes.ts. After that gate runs, handlers can read
+ * `c.get("authUserId")` and trust the value is set.
+ *
+ * See issues/auth-by-default for the full rationale.
  */
 
-import type { Context } from "hono";
-
-/**
- * Returns the authenticated user id, or null if the request is not
- * authenticated.
- */
-export function getAuthUserId(c: Context): string | null {
-  const userId = c.get("authUserId" as never) as string | undefined;
-  return userId ?? null;
-}
+import type { MiddlewareHandler } from "hono";
+import type { AuthVariables } from "@mentra/sdk";
 
 /**
- * Returns the authenticated user id or sends a 401 JSON response.
- * Use as: `const userId = requireAuth(c); if (typeof userId !== "string") return userId;`
+ * Mount on a Hono sub-app to require authentication for every route
+ * registered on that sub-app. Returns 401 Unauthorized when
+ * `c.get("authUserId")` is not set by the SDK auth middleware.
  */
-export function requireAuth(c: Context): string | Response {
-  const userId = getAuthUserId(c);
-  if (!userId) return c.json({ error: "Unauthorized" }, 401);
-  return userId;
-}
+export const requireAuthMiddleware: MiddlewareHandler<{
+  Variables: AuthVariables;
+}> = async (c, next) => {
+  if (!c.get("authUserId")) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+  await next();
+};

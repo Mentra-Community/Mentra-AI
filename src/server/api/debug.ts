@@ -1,14 +1,15 @@
 /**
- * Debug API — dev-only endpoints for testing session lifecycle.
+ * Debug API
  *
- * Even in dev mode, the user can only act on their own session — the
- * id is taken from the authenticated context, not from the request.
+ * Dev-only endpoints for testing session lifecycle. Mounted on the
+ * protected sub-app, so a valid auth token is required just like
+ * any other route. The user can only act on their own session,
+ * since the id comes from c.get("authUserId").
  */
 
 import type { Context } from "hono";
 import { sessions } from "../manager/SessionManager";
 import { broadcastChatEvent, clearPendingEvents } from "./chat";
-import { requireAuth } from "../utils/auth";
 
 /**
  * POST /api/debug/kill-session?mode=soft|hard
@@ -18,8 +19,7 @@ import { requireAuth } from "../utils/auth";
  * - mode=hard: immediate destroy, wipes everything
  */
 export async function killSession(c: Context) {
-  const userId = requireAuth(c);
-  if (typeof userId !== "string") return userId;
+  const userId = c.get("authUserId") as string;
 
   const mode = c.req.query("mode") || "soft";
 
@@ -27,7 +27,6 @@ export async function killSession(c: Context) {
   if (!user) return c.json({ error: "No active session" }, 404);
 
   if (mode === "hard") {
-    // Hard kill — immediate destroy (old behavior)
     broadcastChatEvent(userId, {
       type: "session_ended",
       reason: "debug-hard-kill",
@@ -43,7 +42,7 @@ export async function killSession(c: Context) {
     });
   }
 
-  // Soft kill — grace period (matches real onStop behavior)
+  // Soft kill: grace period (matches real onStop behavior)
   broadcastChatEvent(userId, {
     type: "session_reconnecting",
     reason: "debug-soft-kill",

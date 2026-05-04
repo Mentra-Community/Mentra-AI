@@ -7,7 +7,6 @@
 import type { Context } from "hono";
 import { streamSSE, type SSEStreamingApi } from "hono/streaming";
 import { sessions } from "../manager/SessionManager";
-import { requireAuth } from "../utils/auth";
 
 // Custom writer interface for SSE clients
 interface SSEWriter {
@@ -85,8 +84,7 @@ export function broadcastChatEvent(userId: string, event: {
  * Chat SSE stream endpoint
  */
 export async function chatStream(c: Context) {
-  const userId = requireAuth(c);
-  if (typeof userId !== "string") return userId;
+  const userId = c.get("authUserId") as string;
 
   const recipientId = c.req.query("recipientId");
 

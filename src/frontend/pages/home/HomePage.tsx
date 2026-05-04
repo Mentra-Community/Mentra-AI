@@ -44,8 +44,11 @@ export default function HomePage({ userId }: HomePageProps) {
     );
   }, []);
 
-  // Connect to SSE photo stream
+  // Connect to SSE photo stream. Wait for the frontend token; without
+  // it the server returns 401 and we'd loop on reconnect.
   useEffect(() => {
+    if (!frontendToken) return;
+
     let eventSource: EventSource | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -109,8 +112,11 @@ export default function HomePage({ userId }: HomePageProps) {
     };
   }, [addLog, frontendToken]);
 
-  // Connect to SSE transcription stream
+  // Connect to SSE transcription stream. Same token gating as the
+  // photo stream above.
   useEffect(() => {
+    if (!frontendToken) return;
+
     let eventSource: EventSource | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let idCounter = Date.now();

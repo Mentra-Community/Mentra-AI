@@ -31,8 +31,11 @@ export function DebugOverlay({ onClose }: DebugOverlayProps) {
     listEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [entries]);
 
-  // SSE connection
+  // SSE connection. Wait for the frontend token; otherwise the stream
+  // 401s and triggers an unauthenticated reconnect loop.
   useEffect(() => {
+    if (!frontendToken) return;
+
     const connect = () => {
       const es = new EventSource(
         withAuthSseUrl('/api/transcription-stream', frontendToken),

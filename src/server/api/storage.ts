@@ -1,11 +1,9 @@
 import type { Context } from "hono";
 import { sessions } from "../manager/SessionManager";
-import { requireAuth } from "../utils/auth";
 
 /** GET /theme-preference */
 export async function getThemePreference(c: Context) {
-  const userId = requireAuth(c);
-  if (typeof userId !== "string") return userId;
+  const userId = c.get("authUserId") as string;
 
   const user = sessions.get(userId);
   if (!user?.appSession) {
@@ -22,8 +20,7 @@ export async function getThemePreference(c: Context) {
 
 /** POST /theme-preference */
 export async function setThemePreference(c: Context) {
-  const userId = requireAuth(c);
-  if (typeof userId !== "string") return userId;
+  const userId = c.get("authUserId") as string;
 
   const { theme } = await c.req.json();
   if (!theme || (theme !== "dark" && theme !== "light")) {
