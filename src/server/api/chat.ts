@@ -4,9 +4,9 @@
  * Handles chat SSE stream and message broadcasting.
  */
 
-import type { Context } from "hono";
 import { streamSSE, type SSEStreamingApi } from "hono/streaming";
 import { sessions } from "../manager/SessionManager";
+import type { SessionContext } from "../utils/auth";
 
 // Custom writer interface for SSE clients
 interface SSEWriter {
@@ -83,8 +83,9 @@ export function broadcastChatEvent(userId: string, event: {
 /**
  * Chat SSE stream endpoint
  */
-export async function chatStream(c: Context) {
-  const userId = c.get("authUserId") as string;
+export async function chatStream(c: SessionContext) {
+  const userId = c.get("userId");
+  const user = c.get("user");
 
   const recipientId = c.req.query("recipientId");
 
@@ -105,32 +106,29 @@ export async function chatStream(c: Context) {
     await stream.write(`data: ${JSON.stringify({ type: "connected" })}\n\n`);
 
     // Always send chat history first so the frontend has full conversation context
-    const user = sessions.get(userId);
-    if (user) {
-      const recentTurns = user.chatHistory.getRecentTurns(30);
-      if (recentTurns.length > 0) {
-        const messages = recentTurns.flatMap((turn, index) => [
-          {
-            id: `${Date.now()}-${index * 2}`,
-            senderId: userId,
-            recipientId: recipientId || "mentra-ai",
-            content: turn.query,
-            timestamp: turn.timestamp.toISOString(),
-            image: turn.photoDataUrl,
-          },
-          {
-            id: `${Date.now()}-${index * 2 + 1}`,
-            senderId: recipientId || "mentra-ai",
-            recipientId: userId,
-            content: turn.response,
-            timestamp: turn.timestamp.toISOString(),
-          },
-        ]);
+    const recentTurns = user.chatHistory.getRecentTurns(30);
+    if (recentTurns.length > 0) {
+      const messages = recentTurns.flatMap((turn, index) => [
+        {
+          id: `${Date.now()}-${index * 2}`,
+          senderId: userId,
+          recipientId: recipientId || "mentra-ai",
+          content: turn.query,
+          timestamp: turn.timestamp.toISOString(),
+          image: turn.photoDataUrl,
+        },
+        {
+          id: `${Date.now()}-${index * 2 + 1}`,
+          senderId: recipientId || "mentra-ai",
+          recipientId: userId,
+          content: turn.response,
+          timestamp: turn.timestamp.toISOString(),
+        },
+      ]);
 
-        await stream.write(
-          `data: ${JSON.stringify({ type: "history", messages })}\n\n`
-        );
-      }
+      await stream.write(
+        `data: ${JSON.stringify({ type: "history", messages })}\n\n`,
+      );
     }
 
     // Then flush any events that were broadcast before this client connected

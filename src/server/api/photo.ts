@@ -1,12 +1,8 @@
-import type { Context } from "hono";
-import { sessions } from "../manager/SessionManager";
+import type { SessionContext } from "../utils/auth";
 
-/** GET /latest-photo — metadata for the most recent photo */
-export function getLatestPhoto(c: Context) {
-  const userId = c.get("authUserId") as string;
-
-  const user = sessions.get(userId);
-  if (!user) return c.json({ error: "No photos available" }, 404);
+/** GET /latest-photo: metadata for the most recent photo */
+export function getLatestPhoto(c: SessionContext) {
+  const user = c.get("user");
 
   const photos = user.photo.getAll();
   if (photos.length === 0) {
@@ -21,16 +17,16 @@ export function getLatestPhoto(c: Context) {
   });
 }
 
-/** GET /photo/:requestId — raw photo image data */
-export function getPhotoData(c: Context) {
-  const userId = c.get("authUserId") as string;
+/** GET /photo/:requestId: raw photo image data */
+export function getPhotoData(c: SessionContext) {
+  const user = c.get("user");
+  const userId = c.get("userId");
 
   const requestId = c.req.param("requestId");
   if (!requestId) return c.json({ error: "Photo not found" }, 404);
-  const user = sessions.get(userId);
-  const photo = user?.photo.getPhoto(requestId);
-  if (!photo) return c.json({ error: "Photo not found" }, 404);
-  if (photo.userId !== userId) {
+
+  const photo = user.photo.getPhoto(requestId);
+  if (!photo || photo.userId !== userId) {
     return c.json({ error: "Photo not found" }, 404);
   }
 
@@ -42,16 +38,16 @@ export function getPhotoData(c: Context) {
   });
 }
 
-/** GET /photo-base64/:requestId — photo as base64 JSON */
-export function getPhotoBase64(c: Context) {
-  const userId = c.get("authUserId") as string;
+/** GET /photo-base64/:requestId: photo as base64 JSON */
+export function getPhotoBase64(c: SessionContext) {
+  const user = c.get("user");
+  const userId = c.get("userId");
 
   const requestId = c.req.param("requestId");
   if (!requestId) return c.json({ error: "Photo not found" }, 404);
-  const user = sessions.get(userId);
-  const photo = user?.photo.getPhoto(requestId);
-  if (!photo) return c.json({ error: "Photo not found" }, 404);
-  if (photo.userId !== userId) {
+
+  const photo = user.photo.getPhoto(requestId);
+  if (!photo || photo.userId !== userId) {
     return c.json({ error: "Photo not found" }, 404);
   }
 

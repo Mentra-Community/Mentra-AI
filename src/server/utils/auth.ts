@@ -1,33 +1,66 @@
 /**
  * Auth helpers for the Hono API layer.
  *
- * The MentraOS AppServer base class auto-applies `createAuthMiddleware`
- * across all routes. After it runs, the authenticated user id is
- * available via `c.get("authUserId")` on every handler. The middleware
- * itself does not 401 on a missing token; it just leaves the context
- * variable unset.
+ * Two middlewares form the gate:
  *
- * To make routes fail closed by default, this module exports
- * `requireAuthMiddleware`, mounted on the protected sub-app in
- * routes.ts. After that gate runs, handlers can read
- * `c.get("authUserId")` and trust the value is set.
+ *   requireAuth     401 if no authenticated user. Re-exposes the
+ *                   id from the SDK's authUserId under the
+ *                   friendlier name `userId`.
+ *   requireSession  404 if the authenticated user has no live
+ *                   User in the SessionManager. Sets `user`.
+ *
+ * Sub-apps in routes.ts mount these. Handlers then declare which
+ * variables they need by typing their Context parameter as
+ * AuthContext or SessionContext.
  *
  * See issues/auth-by-default for the full rationale.
  */
 
-import type { MiddlewareHandler } from "hono";
-import type { AuthVariables } from "@mentra/sdk";
+import type { Context, MiddlewareHandler } from "hono";
+
+import { sessions } from "../manager/SessionManager";
+import type { User } from "../session/User";
 
 /**
- * Mount on a Hono sub-app to require authentication for every route
- * registered on that sub-app. Returns 401 Unauthorized when
- * `c.get("authUserId")` is not set by the SDK auth middleware.
+ * Context shape after requireAuth has run. The userId is the
+ * authenticated user's id, never undefined.
  */
-export const requireAuthMiddleware: MiddlewareHandler<{
-  Variables: AuthVariables;
+export type AuthContext = Context<{ Variables: { userId: string } }>;
+
+/**
+ * Context shape after both requireAuth and requireSession have run.
+ * The user is a live User runtime object, never null.
+ */
+export type SessionContext = Context<{
+  Variables: { userId: string; user: User };
+}>;
+
+/**
+ * Require an authenticated user. The SDK's createAuthMiddleware ran
+ * first (mounted globally by AppServer) and set authUserId if the
+ * request had a valid token. This 401s if it did not.
+ */
+export const requireAuth: MiddlewareHandler<{
+  Variables: { userId: string };
 }> = async (c, next) => {
-  if (!c.get("authUserId")) {
-    return c.json({ error: "Unauthorized" }, 401);
-  }
+  const userId = c.get("authUserId" as never) as string | undefined;
+  if (!userId) return c.json({ error: "Unauthorized" }, 401);
+  c.set("userId", userId);
+  await next();
+};
+
+/**
+ * Require a live User in the SessionManager. Mount on a sub-app
+ * after requireAuth. Returns 404 if the user is not currently
+ * tracked (typically because glasses have never connected this
+ * boot, or were hard-disconnected).
+ */
+export const requireSession: MiddlewareHandler<{
+  Variables: { userId: string; user: User };
+}> = async (c, next) => {
+  const userId = c.get("userId");
+  const user = sessions.get(userId);
+  if (!user) return c.json({ error: "No active session" }, 404);
+  c.set("user", user);
   await next();
 };

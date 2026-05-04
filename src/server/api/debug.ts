@@ -1,14 +1,14 @@
 /**
  * Debug API
  *
- * Dev-only endpoints for testing session lifecycle. Mounted on the
- * protected sub-app, so a valid auth token is required just like
- * any other route. The user can only act on their own session,
- * since the id comes from c.get("authUserId").
+ * Dev-only endpoints for testing session lifecycle. Mounted on
+ * the session sub-app, so a valid auth token AND a live User are
+ * required just like any other route there.
  */
 
-import type { Context } from "hono";
 import { sessions } from "../manager/SessionManager";
+import type { SessionContext } from "../utils/auth";
+
 import { broadcastChatEvent, clearPendingEvents } from "./chat";
 
 /**
@@ -18,13 +18,9 @@ import { broadcastChatEvent, clearPendingEvents } from "./chat";
  * - mode=soft (default): grace period, keeps session alive for 60s
  * - mode=hard: immediate destroy, wipes everything
  */
-export async function killSession(c: Context) {
-  const userId = c.get("authUserId") as string;
-
+export async function killSession(c: SessionContext) {
+  const userId = c.get("userId");
   const mode = c.req.query("mode") || "soft";
-
-  const user = sessions.get(userId);
-  if (!user) return c.json({ error: "No active session" }, 404);
 
   if (mode === "hard") {
     broadcastChatEvent(userId, {

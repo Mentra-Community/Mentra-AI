@@ -1,12 +1,10 @@
-import type { Context } from "hono";
-import { sessions } from "../manager/SessionManager";
+import type { SessionContext } from "../utils/auth";
 
 /** GET /theme-preference */
-export async function getThemePreference(c: Context) {
-  const userId = c.get("authUserId") as string;
+export async function getThemePreference(c: SessionContext) {
+  const user = c.get("user");
 
-  const user = sessions.get(userId);
-  if (!user?.appSession) {
+  if (!user.appSession) {
     return c.json({ error: "No active session" }, 404);
   }
 
@@ -19,16 +17,15 @@ export async function getThemePreference(c: Context) {
 }
 
 /** POST /theme-preference */
-export async function setThemePreference(c: Context) {
-  const userId = c.get("authUserId") as string;
+export async function setThemePreference(c: SessionContext) {
+  const user = c.get("user");
 
   const { theme } = await c.req.json();
   if (!theme || (theme !== "dark" && theme !== "light")) {
     return c.json({ error: 'theme must be "dark" or "light"' }, 400);
   }
 
-  const user = sessions.get(userId);
-  if (!user?.appSession) {
+  if (!user.appSession) {
     return c.json({ error: "No active session" }, 404);
   }
 

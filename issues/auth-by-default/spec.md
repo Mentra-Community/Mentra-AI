@@ -45,25 +45,35 @@ route inaccessible, not insecure.
 
 After this change:
 
-| Path                     | Auth required |
-| ------------------------ | ------------- |
-| `/api/health`            | no            |
-| `/api/mentra/auth/*`     | no (token exchange itself) |
-| every other `/api/*`     | yes           |
-| `/api/debug/*`           | yes (and only mounted in dev) |
+| Path                     | Auth required | Active session required |
+| ------------------------ | ------------- | ----------------------- |
+| `/api/health`            | no            | no                      |
+| `/api/mentra/auth/*`     | no            | no                      |
+| `/api/settings`          | yes           | no                      |
+| every other `/api/*`     | yes           | yes                     |
+| `/api/debug/*`           | yes (dev only)| yes                     |
 
-A request that hits a protected route without a valid session,
-bearer token, or signed token returns `401 Unauthorized`. The
-handler never runs.
+A request hitting an auth-required route without a valid token
+returns `401 Unauthorized`. A request hitting a session-required
+route while authenticated but with no active glasses session
+returns `404 No active session`. The handler never runs in either
+case.
 
-Inside a protected handler, `c.get("authUserId")` is guaranteed to
-be a non-empty string. Handlers no longer need `requireAuth(c)`.
+Inside a session-required handler, `c.get("user")` is guaranteed
+to be a non-null `User`. Inside an auth-only handler,
+`c.get("userId")` is guaranteed to be a non-empty string. Handlers
+no longer need to do `sessions.get(userId)` themselves or
+null-check the result.
 
 ## Acceptance
 
-- New routes added to the protected sub-app are gated automatically.
-- A handler that omits any auth check still cannot be reached
-  without a valid token (because the gate runs before the handler).
+- New routes added to the protected sub-app are gated automatically
+  by auth.
+- New routes added to the session sub-app are additionally gated by
+  an active glasses session.
+- Handlers reading `c.get("user")` never have to null-check it; the
+  gate guarantees it.
+- Handlers reading `c.get("userId")` get a typed string, no cast.
 - Public routes are listed in one place (`routes.ts`), making it
   easy to audit what is reachable without auth.
 - `/api/health` still answers `200 OK` with no token.

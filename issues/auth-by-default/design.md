@@ -97,21 +97,38 @@ for this PR; tracked separately.
 
 ### Middleware
 
-A small middleware that 401s if `authUserId` is not set. The SDK's
-`createAuthMiddleware` still runs first (it is mounted globally by
-`AppServer`'s constructor), so by the time this gate runs the
-context is already populated if a valid token was present.
+Two thin middlewares in `utils/auth.ts`. The SDK's
+`createAuthMiddleware` runs first (mounted globally by `AppServer`),
+populating `authUserId` if a valid token exists. `requireAuth` 401s
+if it didn't and re-exposes the id under the friendlier name
+`userId`. `requireSession` chains after `requireAuth` on the
+session sub-app and 404s if the user is not currently connected.
 
 ```ts
 // src/server/utils/auth.ts
-export const requireAuthMiddleware: MiddlewareHandler = async (c, next) => {
-  if (!c.get("authUserId")) return c.json({ error: "Unauthorized" }, 401);
+export const requireAuth: MiddlewareHandler<{
+  Variables: { userId: string };
+}> = async (c, next) => {
+  const userId = c.get("authUserId");
+  if (!userId) return c.json({ error: "Unauthorized" }, 401);
+  c.set("userId", userId);
+  await next();
+};
+
+export const requireSession: MiddlewareHandler<{
+  Variables: { userId: string; user: User };
+}> = async (c, next) => {
+  const userId = c.get("userId");
+  const user = sessions.get(userId);
+  if (!user) return c.json({ error: "No active session" }, 404);
+  c.set("user", user);
   await next();
 };
 ```
 
-The existing `requireAuth(c)` helper is removed. Handlers read
-`c.get("authUserId")` directly and trust it.
+The existing `requireAuth(c)` helper function is removed. Handlers
+read `c.get("userId")` or `c.get("user")` directly and trust the
+gate.
 
 ### Routes
 
@@ -120,38 +137,47 @@ The existing `requireAuth(c)` helper is removed. Handlers read
 const publicApi = new Hono();
 publicApi.get("/health", getHealth);
 
-const protectedApi = new Hono<{ Variables: AuthVariables }>();
-protectedApi.use("*", requireAuthMiddleware);
-
-// SSE buffering headers stay on the protected sub-app.
-protectedApi.use("/photo-stream", sseHeaders);
-protectedApi.use("/transcription-stream", sseHeaders);
-protectedApi.use("/chat/stream", sseHeaders);
-
-protectedApi.get("/photo-stream", photoStream);
-protectedApi.get("/transcription-stream", transcriptionStream);
-protectedApi.get("/chat/stream", chatStream);
-
-protectedApi.post("/speak", speak);
-protectedApi.post("/stop-audio", stopAudio);
-
-protectedApi.get("/theme-preference", getThemePreference);
-protectedApi.post("/theme-preference", setThemePreference);
-
+// Auth-only: works whether or not glasses are connected. DB-backed
+// reads/writes go here.
+const protectedApi = new Hono<{ Variables: { userId: string } }>();
+protectedApi.use("*", requireAuth);
 protectedApi.get("/settings", getSettings);
 protectedApi.patch("/settings", updateSettings);
 
-protectedApi.get("/latest-photo", getLatestPhoto);
-protectedApi.get("/photo/:requestId", getPhotoData);
-protectedApi.get("/photo-base64/:requestId", getPhotoBase64);
+// Session-required: every handler below needs a live User, so the
+// gate does the lookup once and 404s if glasses are not connected.
+const sessionApi = new Hono<{
+  Variables: { userId: string; user: User };
+}>();
+sessionApi.use("*", requireAuth);
+sessionApi.use("*", requireSession);
+
+sessionApi.use("/photo-stream", sseHeaders);
+sessionApi.use("/transcription-stream", sseHeaders);
+sessionApi.use("/chat/stream", sseHeaders);
+
+sessionApi.get("/photo-stream", photoStream);
+sessionApi.get("/transcription-stream", transcriptionStream);
+sessionApi.get("/chat/stream", chatStream);
+
+sessionApi.post("/speak", speak);
+sessionApi.post("/stop-audio", stopAudio);
+
+sessionApi.get("/theme-preference", getThemePreference);
+sessionApi.post("/theme-preference", setThemePreference);
+
+sessionApi.get("/latest-photo", getLatestPhoto);
+sessionApi.get("/photo/:requestId", getPhotoData);
+sessionApi.get("/photo-base64/:requestId", getPhotoBase64);
 
 if (process.env.NODE_ENV === "development") {
-  protectedApi.post("/debug/kill-session", killSession);
+  sessionApi.post("/debug/kill-session", killSession);
 }
 
 export const api = new Hono();
 api.route("/", publicApi);
 api.route("/", protectedApi);
+api.route("/", sessionApi);
 ```
 
 `api` is still the single export consumed by `src/index.ts`, so the
@@ -159,27 +185,84 @@ top-level wiring does not change.
 
 ### Handlers
 
-Per-handler boilerplate is removed:
+Two layers of boilerplate disappear: the auth check, and the
+"is the user connected" lookup.
 
 ```ts
 // before
-export async function getSettings(c: Context) {
+export async function speak(c: Context) {
   const userId = requireAuth(c);
   if (typeof userId !== "string") return userId;
-  // ...
+
+  const { text } = await c.req.json();
+  if (!text) return c.json({ error: "text is required" }, 400);
+
+  const user = sessions.get(userId);
+  if (!user?.appSession) return c.json({ error: "No active session" }, 404);
+
+  await user.audio.speak(text);
+  return c.json({ success: true });
 }
 
 // after
-export async function getSettings(c: Context) {
-  const userId = c.get("authUserId");
-  // ...
+export async function speak(c: Context) {
+  const user = c.get("user"); // typed as User, never null
+
+  const { text } = await c.req.json();
+  if (!text) return c.json({ error: "text is required" }, 400);
+
+  await user.audio.speak(text);
+  return c.json({ success: true });
 }
 ```
 
-The `Context` type alone gives `authUserId` as `string | undefined`,
-which is fine: by the time the handler runs the gate has guaranteed
-it is set, but TypeScript does not know that. We accept the
-non-null assertion or read it with confidence and move on.
+DB-backed handlers that don't need a live session use `userId`:
+
+```ts
+export async function getSettings(c: Context) {
+  const userId = c.get("userId"); // typed as string
+  return c.json(await UserSettings.findOne({ userId }));
+}
+```
+
+### Why split userId vs user
+
+Of the protected handlers in this app, most need the live `User`
+runtime object (audio, photo, chatHistory hang off it).
+`getSettings` and `updateSettings` only need the id (they query
+MongoDB and work whether or not glasses are connected).
+
+Putting both behind one middleware would force the settings routes
+to either accept "no active session" 404s incorrectly, or to
+duplicate the auth check at a finer grain. Splitting into two
+sub-apps lets each handler declare what it actually needs, and the
+type system enforces it.
+
+### Naming
+
+The SDK exposes `c.get("authUserId")`. We expose the same value as
+`c.get("userId")` after the gate, mostly for readability and to
+match the convention in our own code (where `userId` is the term
+used everywhere except the SDK boundary).
+
+`c.get("user")` for the `User` runtime object reads naturally
+because in this app `User` genuinely is the runtime object. It owns
+audio, photo, chatHistory, transcription, and storage managers. It
+is not a thin "user record" with id and email. If that ever becomes
+confusing we can rename to `userSession` or `session`, but `user`
+matches the existing usage in `SessionManager` (`sessions.get(userId)`
+returns a `User`).
+
+### What stays per-handler
+
+Handlers still own:
+
+- request parsing (`c.req.json()`, query params)
+- business logic (calling `user.audio.speak(text)` etc)
+- non-auth error responses (e.g. validating `text` is non-empty)
+
+Auth and "is the glasses session live" are now both middleware
+concerns.
 
 ### Frontend
 
@@ -206,18 +289,21 @@ authenticates like any other client.
 
 For any future handler:
 
-1. Register on `protectedApi` (default) unless the route is
-   genuinely public, in which case use `publicApi` and make the
-   "why" obvious in a comment.
-2. Read `c.get("authUserId")` directly. No helper call.
+1. Pick the sub-app:
+   - `publicApi` only if the route is genuinely public. Comment why.
+   - `protectedApi` if the route only needs the authenticated id
+     (typically DB-backed reads/writes).
+   - `sessionApi` if the handler needs the live `User` (audio,
+     photo, transcription, chat history, etc).
+2. Read `c.get("userId")` or `c.get("user")` directly. No helper
+   call. The type system narrows them to non-null inside the right
+   sub-app.
 3. Do not accept `userId` from query or body. The authenticated id
    wins. If a body field happens to include it, ignore it.
 
 ## Open questions
 
-- Should we add a runtime assertion in protected handlers that
-  `authUserId` is set, just to surface bugs loudly if someone
-  accidentally registers a route on the wrong sub-app? Probably
-  yes, as a thin wrapper utility, but kept minimal.
 - Long term, push this pattern back into the SDK so every miniapp
   inherits fail-closed behavior without duplicating the setup.
+  `createAuthMiddleware({ enforce: true })` plus an optional
+  `requireSession` helper would cover this app and others.
