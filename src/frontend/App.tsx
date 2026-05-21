@@ -78,8 +78,12 @@ export default function App() {
   // Debug mode state with localStorage persistence.
   // In development the overlay auto-opens so the Buttons tab (TTS test,
   // etc.) is always available without the hidden 10-tap gesture.
+  //
+  // NOTE: use process.env.NODE_ENV, not import.meta.env.DEV — Bun only
+  // defines import.meta.env in its dev server, so a production build
+  // (`bun src/index.ts`) would throw on `.DEV` and white-screen the app.
   const [debugMode, setDebugMode] = useState(() => {
-    if (import.meta.env.DEV) return true;
+    if (process.env.NODE_ENV === 'development') return true;
     return localStorage.getItem('mentra-debug-mode') === 'true';
   });
   const [debugToast, setDebugToast] = useState<string | null>(null);
