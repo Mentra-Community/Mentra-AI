@@ -75,8 +75,11 @@ export default function App() {
     }
   }, [theme, isAuthenticated, userId, frontendToken]);
 
-  // Debug mode state with localStorage persistence
+  // Debug mode state with localStorage persistence.
+  // In development the overlay auto-opens so the Buttons tab (TTS test,
+  // etc.) is always available without the hidden 10-tap gesture.
   const [debugMode, setDebugMode] = useState(() => {
+    if (import.meta.env.DEV) return true;
     return localStorage.getItem('mentra-debug-mode') === 'true';
   });
   const [debugToast, setDebugToast] = useState<string | null>(null);
