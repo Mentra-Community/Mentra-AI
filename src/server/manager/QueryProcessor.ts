@@ -11,7 +11,16 @@ import { generateResponse, type GenerateOptions } from "../agent/MentraAgent";
 import { broadcastChatEvent } from "../api/chat";
 import { formatForTTS } from "../utils/tts-formatter";
 
-const PROCESSING_SOUND_URL = process.env.PROCESSING_SOUND_URL;
+/**
+ * URL the glasses fetch for the looping "thinking" sound while a query is
+ * being processed. Derived from PUBLIC_URL (the public origin
+ * the glasses can reach this server at) + the bundled asset path under
+ * /assets/audio/start.mp3. Falls back to null if PUBLIC_URL
+ * isn't set; the loop simply no-ops in that case.
+ */
+const PROCESSING_SOUND_URL = process.env.PUBLIC_URL
+  ? `${process.env.PUBLIC_URL.replace(/\/$/, "")}/assets/audio/popping.mp3`
+  : null;
 
 /**
  * QueryProcessor — handles the full query processing pipeline.

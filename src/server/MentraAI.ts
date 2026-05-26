@@ -10,8 +10,6 @@ import { sessions } from "./manager/SessionManager";
 import { broadcastChatEvent } from "./api/chat";
 import { connectDB } from "./db/connection";
 
-const WELCOME_SOUND_URL = process.env.WELCOME_SOUND_URL;
-
 export interface MentraAIConfig {
   packageName: string;
   apiKey: string;
@@ -126,37 +124,22 @@ export class MentraAI extends AppServer {
   }
 
   /**
-   * Play the welcome sound/message
+   * Play the welcome message on supported glasses.
+   *
+   * HUD glasses get a text-wall greeting. Camera-only glasses get nothing
+   * for now — the previous welcome-audio path was disabled (the inner
+   * playAudio call was commented out) because it conflicted with the
+   * camera shutter sound on Mentra Live.
    */
   private playWelcome(session: AppSession, sessionId: string): void {
     const hasDisplay = session.capabilities?.hasDisplay ?? false;
 
     if (hasDisplay) {
-      // HUD glasses: show text
       session.layouts.showTextWall(
         "Mentra AI\n\nWelcome to Mentra AI.\nSay \"Hey Mentra\" followed by your question.",
         { durationMs: 3000 }
       );
-    } else {
-      // Camera-only glasses: play welcome audio after delay
-      if (WELCOME_SOUND_URL) {
-        setTimeout(() => {
-          // session.audio.playAudio({ audioUrl: WELCOME_SOUND_URL }).catch((err) => {
-          //   console.debug("Welcome audio failed:", err);
-          // });
-        }, 1000);
-      }
     }
-    //  else { //TODO plays Welcome to Mentra AI for camera glasses removed for now until audio function is stable
-    //   // Camera-only glasses: play welcome audio after delay
-    //   if (WELCOME_SOUND_URL) {
-    //     setTimeout(() => {
-    //       session.audio.playAudio({ audioUrl: WELCOME_SOUND_URL }).catch((err) => {
-    //         console.debug("Welcome audio failed:", err);
-    //       });
-    //     }, 1000);
-    //   }
-    // }
   }
 
   /**
