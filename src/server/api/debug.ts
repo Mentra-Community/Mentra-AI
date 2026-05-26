@@ -52,3 +52,67 @@ export async function killSession(c: SessionContext) {
     message: "Session soft-killed (60s grace period)",
   });
 }
+
+/**
+ * Common handler for the two dev-only sound-test endpoints. Both fire a
+ * server-side `playAudio` call exactly the way the real pipeline does
+ * (TranscriptionManager.playStartSound, QueryProcessor.startProcessingSound)
+ * so we can isolate "is playAudio working in prod?" from "is the wake-word
+ * path working?"
+ *
+ * The URL is derived from PUBLIC_URL the same way the real code does it,
+ * so this test produces a result that exactly matches a real activation.
+ *
+ * NOT gated on NODE_ENV === "development" — debugging prod audio is the
+ * whole reason this exists.
+ */
+async function playAssetSound(
+  c: SessionContext,
+  assetPath: string,
+): Promise<Response> {
+  const user = c.get("user");
+  if (!user.appSession) {
+    return c.json({ error: "No active glasses session" }, 404);
+  }
+
+  const base = process.env.PUBLIC_URL;
+  if (!base) {
+    return c.json({ error: "PUBLIC_URL is not set" }, 500);
+  }
+
+  const url = `${base.replace(/\/$/, "")}${assetPath}`;
+  console.log(`🔊 [/api/debug/play-sound] user=${user.userId} url=${url}`);
+
+  const t0 = Date.now();
+  try {
+    const result = await user.appSession.audio.playAudio({ audioUrl: url });
+    const ms = Date.now() - t0;
+    console.log(
+      `🔊 [/api/debug/play-sound] resolved in ${ms}ms  success=${result?.success}  error=${result?.error ?? "none"}`,
+    );
+    return c.json({
+      success: result?.success ?? true,
+      url,
+      durationMs: ms,
+      playback: {
+        success: result?.success ?? null,
+        duration: result?.duration ?? null,
+        error: result?.error ?? null,
+      },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`🔊 [/api/debug/play-sound] threw: ${msg}`);
+    return c.json({ success: false, url, error: msg }, 500);
+  }
+}
+
+/** POST /api/debug/play-start — fires /assets/audio/start.mp3 on the glasses. */
+export async function playStartSound(c: SessionContext) {
+  return playAssetSound(c, "/assets/audio/start.mp3");
+}
+
+/** POST /api/debug/play-popping — fires /assets/audio/popping.mp3 on the glasses. */
+export async function playPoppingSound(c: SessionContext) {
+  return playAssetSound(c, "/assets/audio/popping.mp3");
+}

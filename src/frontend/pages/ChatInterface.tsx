@@ -172,6 +172,18 @@ function ChatInterface({ userId, recipientId, onEnableDebugMode }: ChatInterface
   const [chatHistoryEnabled, setChatHistoryEnabled] = useState(false);
   const [sessionActive, setSessionActive] = useState<boolean | null>(null);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+
+  // Dev-only hook so the Debug overlay's wake-glow button can flip the
+  // chromatic ring on without an SSE round-trip. Pure UI preview; does
+  // not send anything to the glasses or server. The glow stays in the set
+  // state indefinitely — no auto-revert — so it survives toggle taps.
+  useEffect(() => {
+    const w = window as Window;
+    w.__setDevWakeWord = (on: boolean) => setWakeWordActive(on);
+    return () => {
+      delete w.__setDevWakeWord;
+    };
+  }, []);
   const [currentPage, setCurrentPage] = useState<'chat' | 'settings'>('chat');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);

@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useMentraAuth } from '@mentra/react';
 import { withAuthSseUrl } from '../lib/authFetch';
 import { TtsTestButton } from '../pages/home/components/TtsTestButton';
+import { WakeGlowButton } from '../pages/home/components/WakeGlowButton';
+import { SoundTestButtons } from '../pages/home/components/SoundTestButtons';
 
 interface TranscriptionEntry {
   id: number;
@@ -244,6 +246,8 @@ export function DebugOverlay({ onClose }: DebugOverlayProps) {
           {/* Trigger buttons */}
           <div className="p-2.5 flex flex-col gap-2 border-b border-white/10">
             <TtsTestButton onLog={addActionLog} />
+            <WakeGlowButton onLog={addActionLog} />
+            <SoundTestButtons onLog={addActionLog} />
           </div>
           {/* Action log */}
           <div

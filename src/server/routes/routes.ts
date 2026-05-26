@@ -18,7 +18,7 @@ import { Hono } from "hono";
 
 import { speak, stopAudio } from "../api/audio";
 import { chatStream } from "../api/chat";
-import { killSession } from "../api/debug";
+import { killSession, playPoppingSound, playStartSound } from "../api/debug";
 import { getHealth } from "../api/health";
 import { getLatestPhoto, getPhotoData, getPhotoBase64 } from "../api/photo";
 import { getSettings, updateSettings } from "../api/settings";
@@ -90,6 +90,11 @@ sessionApi.get("/photo-base64/:requestId", getPhotoBase64);
 if (process.env.NODE_ENV === "development") {
   sessionApi.post("/debug/kill-session", killSession);
 }
+
+// Sound test endpoints — kept available in prod because the whole point
+// is verifying playAudio works in prod (where it has been flaky).
+sessionApi.post("/debug/play-start", playStartSound);
+sessionApi.post("/debug/play-popping", playPoppingSound);
 
 export const api = new Hono();
 api.route("/", publicApi);
