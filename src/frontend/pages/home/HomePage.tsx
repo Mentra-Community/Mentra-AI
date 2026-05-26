@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useMentraAuth } from "@mentra/react";
 import { Camera, Zap, Terminal, Moon, Sun } from "lucide-react";
 import {
   Badge,
@@ -9,6 +10,7 @@ import {
   TabsContent,
 } from "../../components/ui";
 import { useTheme } from "../../App";
+import { withAuthSseUrl } from "../../lib/authFetch";
 import { PhotoStream, type Photo } from "./components/PhotoStream";
 import { AudioControls } from "./components/AudioControls";
 import {
@@ -22,6 +24,7 @@ interface HomePageProps {
 }
 
 export default function HomePage({ userId }: HomePageProps) {
+  const { frontendToken } = useMentraAuth();
   const { isDarkMode, toggleTheme } = useTheme();
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [transcriptions, setTranscriptions] = useState<Transcription[]>([]);
@@ -41,15 +44,18 @@ export default function HomePage({ userId }: HomePageProps) {
     );
   }, []);
 
-  // Connect to SSE photo stream
+  // Connect to SSE photo stream. Wait for the frontend token; without
+  // it the server returns 401 and we'd loop on reconnect.
   useEffect(() => {
+    if (!frontendToken) return;
+
     let eventSource: EventSource | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
     const connect = () => {
       try {
         eventSource = new EventSource(
-          `/api/photo-stream?userId=${encodeURIComponent(userId)}`,
+          withAuthSseUrl("/api/photo-stream", frontendToken),
         );
 
         eventSource.onopen = () => addLog("Connected to photo stream");
@@ -104,10 +110,13 @@ export default function HomePage({ userId }: HomePageProps) {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       eventSource?.close();
     };
-  }, [addLog, userId]);
+  }, [addLog, frontendToken]);
 
-  // Connect to SSE transcription stream
+  // Connect to SSE transcription stream. Same token gating as the
+  // photo stream above.
   useEffect(() => {
+    if (!frontendToken) return;
+
     let eventSource: EventSource | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let idCounter = Date.now();
@@ -115,7 +124,7 @@ export default function HomePage({ userId }: HomePageProps) {
     const connect = () => {
       try {
         eventSource = new EventSource(
-          `/api/transcription-stream?userId=${encodeURIComponent(userId)}`,
+          withAuthSseUrl("/api/transcription-stream", frontendToken),
         );
 
         eventSource.onopen = () => addLog("Connected to transcription stream");
@@ -179,7 +188,7 @@ export default function HomePage({ userId }: HomePageProps) {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       eventSource?.close();
     };
-  }, [addLog, userId]);
+  }, [addLog, frontendToken]);
 
   return (
     <div className="max-w-5xl mx-auto p-4 md:p-6 space-y-4">
@@ -211,7 +220,7 @@ export default function HomePage({ userId }: HomePageProps) {
       <PhotoStream photos={photos} />
 
       {/* Audio Controls */}
-      <AudioControls userId={userId} onLog={addLog} />
+      <AudioControls onLog={addLog} />
 
       {/* Transcriptions & Logs */}
       <Tabs defaultValue="transcriptions">

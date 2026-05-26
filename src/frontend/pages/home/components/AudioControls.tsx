@@ -1,41 +1,73 @@
 import { useState } from "react";
+import { useMentraAuth } from "@mentra/react";
 import { Mic } from "lucide-react";
 import { Card, Button, Input } from "../../../components/ui";
+import { createAuthFetch } from "../../../lib/authFetch";
 
 interface AudioControlsProps {
-  userId: string;
   onLog: (message: string) => void;
 }
 
-export function AudioControls({ userId, onLog }: AudioControlsProps) {
+export function AudioControls({ onLog }: AudioControlsProps) {
+  const { frontendToken } = useMentraAuth();
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speakText, setSpeakText] = useState("");
 
+  /**
+   * POST text to /api/speak and log every step so a silent failure is
+   * always traceable from the frontend log panel.
+   */
   const handleSpeak = async () => {
     if (!speakText.trim()) {
-      onLog("Please enter text to speak");
+      onLog("⚠️ TTS: no text to speak");
       return;
     }
 
+    setIsSpeaking(true);
+    onLog(`🔊 TTS: sending "${speakText.slice(0, 60)}${speakText.length > 60 ? "…" : ""}"`);
+
     try {
-      const response = await fetch("/api/speak", {
+      const authFetch = createAuthFetch(frontendToken);
+      const t0 = performance.now();
+      const response = await authFetch("/api/speak", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: speakText, userId }),
+        body: JSON.stringify({ text: speakText }),
       });
+      const ms = Math.round(performance.now() - t0);
 
-      const data = await response.json();
+      let data: any = {};
+      try {
+        data = await response.json();
+      } catch {
+        // non-JSON body
+      }
 
       if (response.ok) {
-        onLog(`Speaking: "${speakText}"`);
-        setIsSpeaking(true);
-        setTimeout(() => setIsSpeaking(false), 2000);
+        onLog(`✅ TTS: server accepted (HTTP ${response.status}, ${ms}ms)`);
+        const caps = data.capabilities;
+        if (caps) {
+          onLog(
+            `🎛️ glasses: model=${caps.modelName ?? "?"} ` +
+              `hasSpeaker=${caps.hasSpeaker} hasDisplay=${caps.hasDisplay}`,
+          );
+          if (caps.hasSpeaker === false) {
+            onLog(
+              "🔇 TTS: glasses report NO speaker — audio will not play. " +
+                "Device capability issue, not the speak function.",
+            );
+          } else {
+            onLog("👂 TTS: audio sent to glasses — you should hear it now.");
+          }
+        }
         setSpeakText("");
       } else {
-        onLog(`Error: ${data.error}`);
+        onLog(`❌ TTS: server rejected (HTTP ${response.status}): ${data.error ?? "unknown error"}`);
       }
     } catch (error) {
-      onLog(`Failed to speak: ${error}`);
+      onLog(`❌ TTS: request failed — ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setIsSpeaking(false);
     }
   };
 
@@ -49,24 +81,18 @@ export function AudioControls({ userId, onLog }: AudioControlsProps) {
         <Input
           value={speakText}
           onChange={(e) => setSpeakText(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleSpeak()}
+          onKeyDown={(e) => e.key === "Enter" && !isSpeaking && handleSpeak()}
           placeholder="Type something to speak..."
           className="h-8 text-sm"
         />
         <Button
           size="sm"
           onClick={handleSpeak}
-          disabled={!speakText.trim()}
+          disabled={isSpeaking || !speakText.trim()}
           className="shrink-0"
         >
-          {isSpeaking ? (
-            <Mic className="w-3.5 h-3.5 animate-pulse" />
-          ) : (
-            <Mic className="w-3.5 h-3.5" />
-          )}
-          <span className="hidden sm:inline">
-            {isSpeaking ? "Speaking..." : "Speak"}
-          </span>
+          <Mic className={`w-3.5 h-3.5 ${isSpeaking ? "animate-pulse" : ""}`} />
+          <span className="hidden sm:inline">{isSpeaking ? "Speaking…" : "Speak"}</span>
         </Button>
       </div>
     </Card>

@@ -2,6 +2,18 @@ import type { AppSession, TranscriptionData } from "@mentra/sdk";
 import type { User } from "../session/User";
 import type { StoredPhoto } from "./PhotoManager";
 import { detectWakeWord, removeWakeWord, stripWakeWordResidue } from "../utils/wake-word";
+import { broadcastChatEvent } from "../api/chat";
+
+/**
+ * URL the glasses fetch for the short "I heard you" cue that plays the
+ * moment the wake phrase is detected. Derived from PUBLIC_URL (the public
+ * origin the glasses can reach this server at) + the bundled asset path
+ * under /assets/audio/start.mp3. Null if PUBLIC_URL isn't set — playback
+ * simply no-ops.
+ */
+const START_SOUND_URL = process.env.PUBLIC_URL
+  ? `${process.env.PUBLIC_URL.replace(/\/$/, "")}/assets/audio/start.mp3`
+  : null;
 
 interface SSEWriter {
   write: (data: string) => void;
@@ -145,6 +157,7 @@ export class TranscriptionManager {
 
       // Wake word detected! Start listening
       console.log(`⏱️ [WAKE] Wake word detected: "${text}" (isFinal=${isFinal ?? false})`);
+      broadcastChatEvent(this.user.userId, { type: "wake_word" });
       this.startListening(speakerId);
     }
 
@@ -220,9 +233,11 @@ export class TranscriptionManager {
       this.pendingPhoto = null;
     }
 
-    // Play start listening sound
-    // NOTE: Don't do this because it interferes with the Mentra Live's camera's "snap" sound
-    //this.playStartSound();
+    // Play the activation cue immediately on wake-phrase detection so the
+    // wearer hears that we're listening. (Previously disabled because it
+    // overlapped the Mentra Live camera "snap" sound — re-enabled with a
+    // shorter start.mp3 served from our own /assets/audio.)
+    this.playStartSound();
 
     // Start max listening timeout
     this.maxListeningTimeout = setTimeout(() => {
@@ -374,15 +389,15 @@ export class TranscriptionManager {
   }
 
   /**
-   * Play the start listening sound
+   * Play the activation sound the moment the wake phrase is detected.
+   * Uses START_SOUND_URL (derived once at module load from PUBLIC_URL).
+   * Fire-and-forget — a missed cue isn't worth blocking the pipeline for.
    */
   private playStartSound(): void {
-    const soundUrl = process.env.START_LISTENING_SOUND_URL;
-    if (soundUrl && this.user.appSession) {
-      this.user.appSession.audio.playAudio({ audioUrl: soundUrl }).catch((err) => {
-        console.debug('Start listening sound failed:', err);
-      });
-    }
+    if (!START_SOUND_URL || !this.user.appSession) return;
+    this.user.appSession.audio.playAudio({ audioUrl: START_SOUND_URL }).catch((err) => {
+      console.debug('Start listening sound failed:', err);
+    });
   }
 
   /**

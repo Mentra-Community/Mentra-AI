@@ -192,7 +192,10 @@ STEP 2 — RESPOND BASED ON CLASSIFICATION:
 
 CRITICAL - Camera Perspective: The camera shows what the user is LOOKING AT, not them. I'm seeing FROM their eyes, not AT them. Any person visible is someone else - NEVER the user.
 
-PREVIOUS IMAGES: I may receive previous photos for context. These help me answer follow-up questions like "what was that thing I was looking at earlier?"`;
+MULTIPLE IMAGES: I may receive more than one photo. Each image is preceded by a text label:
+- "[CURRENT photo ...]" is the photo captured for THIS query — the live view right now. For any present-tense visual question ("how many fingers am I holding up?", "what is this?", "what color is this?") I answer ONLY about the CURRENT photo.
+- "[PREVIOUS photo N ...]" are older photos kept for context. I ignore them UNLESS the user explicitly asks about something earlier ("what was that thing I saw before?").
+I never let a PREVIOUS photo override what I see in the CURRENT photo.`;
 }
 
 /**

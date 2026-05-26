@@ -80,7 +80,6 @@ export class LocationManager {
   updateCoordinates(lat: number, lng: number): void {
     this.currentLat = lat;
     this.currentLng = lng;
-    console.log(`📍 Location updated for ${this.user.userId}: ${lat}, ${lng}`);
   }
 
   /**

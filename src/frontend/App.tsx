@@ -3,6 +3,7 @@ import { useMentraAuth } from '@mentra/react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ChatInterface from './pages/ChatInterface';
 import { DebugOverlay } from './components/DebugOverlay';
+import { createAuthFetch } from './lib/authFetch';
 
 // Theme Context
 interface ThemeContextValue {
@@ -22,7 +23,7 @@ export function useTheme() {
 }
 
 export default function App() {
-  const { userId, isLoading, error, isAuthenticated } = useMentraAuth();
+  const { userId, frontendToken, isLoading, error, isAuthenticated } = useMentraAuth();
 
   // Theme state with localStorage persistence
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -49,7 +50,8 @@ export default function App() {
   // Sync theme with backend when user authenticates
   useEffect(() => {
     if (isAuthenticated && userId) {
-      fetch(`/api/settings?userId=${encodeURIComponent(userId)}`)
+      const authFetch = createAuthFetch(frontendToken);
+      authFetch('/api/settings')
         .then((res) => res.json())
         .then((data) => {
           if (data.theme === 'dark' || data.theme === 'light') {
@@ -59,21 +61,29 @@ export default function App() {
         })
         .catch(() => {});
     }
-  }, [isAuthenticated, userId]);
+  }, [isAuthenticated, userId, frontendToken]);
 
   // Save theme to backend on change
   useEffect(() => {
     if (isAuthenticated && userId) {
-      fetch('/api/settings', {
+      const authFetch = createAuthFetch(frontendToken);
+      authFetch('/api/settings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, theme }),
+        body: JSON.stringify({ theme }),
       }).catch(() => {});
     }
-  }, [theme, isAuthenticated, userId]);
+  }, [theme, isAuthenticated, userId, frontendToken]);
 
-  // Debug mode state with localStorage persistence
+  // Debug mode state with localStorage persistence.
+  // In development the overlay auto-opens so the Buttons tab (TTS test,
+  // etc.) is always available without the hidden 10-tap gesture.
+  //
+  // NOTE: use process.env.NODE_ENV, not import.meta.env.DEV — Bun only
+  // defines import.meta.env in its dev server, so a production build
+  // (`bun src/index.ts`) would throw on `.DEV` and white-screen the app.
   const [debugMode, setDebugMode] = useState(() => {
+    if (process.env.NODE_ENV === 'development') return true;
     return localStorage.getItem('mentra-debug-mode') === 'true';
   });
   const [debugToast, setDebugToast] = useState<string | null>(null);
@@ -144,7 +154,7 @@ export default function App() {
 
         {/* Debug overlay — rendered outside ChatInterface so it appears on all pages */}
         {debugMode && userId && (
-          <DebugOverlay userId={userId} onClose={disableDebugMode} />
+          <DebugOverlay onClose={disableDebugMode} />
         )}
 
         {/* Debug toast */}

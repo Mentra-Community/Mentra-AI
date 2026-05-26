@@ -29,8 +29,8 @@ function Header({
       ) : (
         <button
           onClick={onSettingsClick}
-          className="mt-[25px] w-[40px] h-[40px] rounded-full flex items-center justify-center transition-all duration-300 hover:opacity-80 hover:scale-110"
-          style={{ backgroundColor: 'var(--primary-foreground)' }}
+          className="  h-[40px] rounded-full flex items-center justify-center transition-all duration-300 hover:opacity-80 hover:scale-110"
+          style={{ backgroundColor: 'transparent' }}
         >
           <Settings className="w-6 h-6" style={{ color: 'var(--secondary-foreground)' }} />
         </button>

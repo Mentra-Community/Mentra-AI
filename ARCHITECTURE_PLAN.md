@@ -133,7 +133,6 @@ MentraOS Device (Glasses)
         ├─ Load user settings from MongoDB
         ├─ Wire up event listeners
         ├─ Connect to MongoDB for chat history
-        └─ Play welcome message (URL from .env: WELCOME_SOUND_URL)
 
 SessionManager (singleton)
 └─ Map<userId, User>
@@ -1047,8 +1046,6 @@ Required env vars (already set):
 - `GOOGLE_MAPS_API_KEY` - For geocoding
 - `GOOGLE_WEATHER_API_KEY` - For weather data
 - `JINA_API_KEY` - Web search
-- `WELCOME_SOUND_URL` - Audio URL for welcome message on session start
-- `PROCESSING_SOUND_URL` - Audio URL for processing indicator
 - `START_LISTENING_SOUND_URL` - Audio URL when wake word detected
 
 ---

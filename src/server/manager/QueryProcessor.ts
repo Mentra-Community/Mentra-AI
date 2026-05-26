@@ -11,7 +11,16 @@ import { generateResponse, type GenerateOptions } from "../agent/MentraAgent";
 import { broadcastChatEvent } from "../api/chat";
 import { formatForTTS } from "../utils/tts-formatter";
 
-const PROCESSING_SOUND_URL = process.env.PROCESSING_SOUND_URL;
+/**
+ * URL the glasses fetch for the looping "thinking" sound while a query is
+ * being processed. Derived from PUBLIC_URL (the public origin
+ * the glasses can reach this server at) + the bundled asset path under
+ * /assets/audio/start.mp3. Falls back to null if PUBLIC_URL
+ * isn't set; the loop simply no-ops in that case.
+ */
+const PROCESSING_SOUND_URL = process.env.PUBLIC_URL
+  ? `${process.env.PUBLIC_URL.replace(/\/$/, "")}/assets/audio/popping.mp3`
+  : null;
 
 /**
  * QueryProcessor — handles the full query processing pipeline.
@@ -36,12 +45,13 @@ export class QueryProcessor {
     const pipelineStart = Date.now();
     const lap = (label: string) => console.log(`⏱️ [${label}] +${Date.now() - pipelineStart}ms`);
 
-    // Determine glasses type from hasDisplay — the single source of truth.
-    // hasDisplay=true → display glasses (no camera, no speakers)
-    // hasDisplay=false → camera glasses (has camera, has speakers)
+    // Read hardware capabilities directly from the SDK — the single source of
+    // truth. Each is an independent flag; do NOT derive one from another
+    // (HUD glasses can also have a speaker).
     const hasDisplay = session.capabilities?.hasDisplay ?? false;
-    const hasCamera = !hasDisplay;
-    const hasSpeakers = !hasDisplay;
+    const hasCamera = session.capabilities?.hasCamera ?? false;
+    const hasSpeakers = session.capabilities?.hasSpeaker ?? false;
+    console.log(`🎛️ capabilities: hasDisplay=${hasDisplay} hasCamera=${hasCamera} hasSpeaker=${hasSpeakers} model=${session.capabilities?.modelName ?? 'unknown'}`);
 
     console.log(`⏱️ [PIPELINE-START] Query: "${query.slice(0, 60)}..." | prePhoto: ${prePhoto ? 'yes' : 'no'} | isVisual: ${isVisual ?? 'n/a'} | glasses: ${hasDisplay ? 'display' : 'camera'}`);
 
@@ -61,19 +71,34 @@ export class QueryProcessor {
         photoDataUrl = `data:${prePhoto.mimeType};base64,${prePhoto.buffer.toString("base64")}`;
         lap('PHOTO-FROM-CACHE');
       } else {
-        // No pre-photo — fallback capture with 10s timeout
+        // No pre-photo — fallback capture with a 10s cap.
+        //
+        // takePhoto() resolves to null on failure (never rejects) but it can
+        // stay pending until the SDK's own 30s photo timeout. We cap the wait
+        // at 10s so a wedged camera can't stall the whole query pipeline.
         console.log(`📸 No pre-photo, attempting fallback capture for ${this.user.userId}`);
+        const fbStart = Date.now();
         let timeoutId: NodeJS.Timeout;
+        let timedOut = false;
+
         const currentPhoto = await Promise.race([
           this.user.photo.takePhoto(),
-          new Promise<null>(r => { timeoutId = setTimeout(() => r(null), 10000); }),
+          new Promise<null>(r => {
+            timeoutId = setTimeout(() => {
+              timedOut = true;
+              console.warn(`📸 Fallback capture hit 10s cap — continuing without photo for ${this.user.userId}`);
+              r(null);
+            }, 10000);
+          }),
         ]);
         clearTimeout(timeoutId!);
+
         if (currentPhoto) {
           photos = this.user.photo.getPhotosForContext();
           photoDataUrl = `data:${currentPhoto.mimeType};base64,${currentPhoto.buffer.toString("base64")}`;
-        } else {
-          console.warn(`📸 Fallback photo capture failed/timed out for ${this.user.userId}`);
+          console.log(`📸 Fallback photo captured in ${Date.now() - fbStart}ms for ${this.user.userId}`);
+        } else if (!timedOut) {
+          console.warn(`📸 Fallback photo capture failed for ${this.user.userId}`);
         }
         lap('PHOTO-FALLBACK-CAPTURE');
       }
@@ -162,16 +187,11 @@ export class QueryProcessor {
     broadcastChatEvent(this.user.userId, { type: "idle" });
     lap('SSE-BROADCAST-AI-MSG');
 
-    // Step 6: Format response for output
-    const formattedResponse = this.formatResponse(
-      response,
-      context.hasSpeakers,
-      context.hasDisplay
-    );
-
-    // Step 7: Stop processing sound loop and output response (fire-and-forget — don't block pipeline)
+    // Step 6: Stop processing sound loop and output response.
+    // outputResponse formats per-channel (raw for HUD, TTS-formatted for speech).
+    // Fire-and-forget — don't block pipeline.
     this.stopProcessingSound();
-    this.outputResponse(formattedResponse, context.hasSpeakers, context.hasDisplay);
+    this.outputResponse(response, context.hasSpeakers, context.hasDisplay);
     lap('OUTPUT-TO-GLASSES');
 
     // Step 8: Save to chat history
@@ -265,24 +285,10 @@ export class QueryProcessor {
   }
 
   /**
-   * Format response for output
-   */
-  private formatResponse(
-    response: string,
-    hasSpeakers: boolean,
-    hasDisplay: boolean
-  ): string {
-    // For speaker-only glasses, format for TTS
-    if (hasSpeakers && !hasDisplay) {
-      return formatForTTS(response);
-    }
-
-    // For HUD glasses or mixed, return as-is
-    return response;
-  }
-
-  /**
-   * Output the response (speak and/or display)
+   * Output the response to each available channel.
+   * The HUD gets the raw response; the speaker gets a TTS-formatted version
+   * so numbers/symbols/abbreviations are read naturally. Glasses with both
+   * a display and a speaker get both.
    */
   private async outputResponse(
     response: string,
@@ -292,7 +298,7 @@ export class QueryProcessor {
     const session = this.user.appSession;
     if (!session) return;
 
-    // Display on HUD if available
+    // Display on HUD if available — raw text, with symbols intact.
     if (hasDisplay) {
       try {
         await session.layouts.showTextWall(response, { durationMs: 10000 });
@@ -301,11 +307,17 @@ export class QueryProcessor {
       }
     }
 
-    // Speak if speakers available (fire-and-forget — don't await, it blocks 3-5s)
+    // Speak if a speaker is available (fire-and-forget — speak() blocks 3-5s).
+    // Route through AudioManager, not session.audio.speak() directly: the SDK's
+    // TTS URL builder mishandles our `/ws/miniapp` cloud path.
     if (hasSpeakers) {
-      session.audio.speak(response).catch((error) => {
+      const spoken = formatForTTS(response);
+      console.log(`🔊 speaking ${spoken.length} chars to glasses`);
+      this.user.audio.speak(spoken).catch((error) => {
         console.debug("Speech output failed:", error);
       });
+    } else {
+      console.log("🔇 hasSpeaker=false — not speaking response");
     }
   }
 }

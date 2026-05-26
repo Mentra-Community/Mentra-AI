@@ -99,14 +99,23 @@ export async function generateResponse(options: GenerateOptions): Promise<Genera
     { type: "text", text: query },
   ];
 
-  // Add photos (current + previous)
+  // Add photos (current + previous). Photos are ordered current-first
+  // (see PhotoManager.getPhotosForContext). Each image is prefixed with a
+  // label so the model knows which one to answer about — without it, an
+  // identical visual query ("how many fingers?") can latch onto a stale photo.
   if (photos && photos.length > 0) {
-    for (const photoBuffer of photos) {
+    photos.forEach((photoBuffer, i) => {
+      content.push({
+        type: "text",
+        text: i === 0
+          ? "[CURRENT photo — what the user is looking at right now. Answer about THIS image.]"
+          : `[PREVIOUS photo ${i} — older context only. Ignore unless the user explicitly asks about something earlier.]`,
+      });
       content.push({
         type: "image",
         image: photoBuffer,
       });
-    }
+    });
   }
 
   console.log(`🤖 Generating response for: "${query.slice(0, 50)}${query.length > 50 ? '...' : ''}"`);

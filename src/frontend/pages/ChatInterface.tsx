@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, memo } from 'react';
+import { useMentraAuth } from '@mentra/react';
 import { X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { withAuthSseUrl } from '../lib/authFetch';
 // @ts-ignore - Bun bundler doesn't resolve `export { X as default }` re-exports correctly
 import LottieImport from 'lottie-react';
 const Lottie: typeof LottieImport = (LottieImport as any)?.default ?? LottieImport;
@@ -13,6 +15,7 @@ import ColorMiraLogo from '../../public/figma-parth-assets/icons/color-mira-logo
 import Settings from './Settings';
 import Header from '../components/Header';
 import BottomHeader from '../components/BottomHeader';
+import { ChromaticBorder } from '../components/ChromaticBorder';
 import { fetchUserSettings } from '../api/settings.api';
 
 interface Message {
@@ -145,11 +148,13 @@ const ChatBubble = memo(function ChatBubble({
  * ChatInterface component - Beautiful dark-themed chat UI
  */
 function ChatInterface({ userId, recipientId, onEnableDebugMode }: ChatInterfaceProps) {
+  const { frontendToken } = useMentraAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [hasConnectedBefore] = useState(() => {
     return sessionStorage.getItem('mentra-session-connected') === 'true';
   });
   const [isProcessing, setIsProcessing] = useState(false);
+  const [wakeWordActive, setWakeWordActive] = useState(false);
   const [thinkingWord, setThinkingWord] = useState(() =>
     THINKING_WORDS[Math.floor(Math.random() * THINKING_WORDS.length)]
   );
@@ -167,6 +172,18 @@ function ChatInterface({ userId, recipientId, onEnableDebugMode }: ChatInterface
   const [chatHistoryEnabled, setChatHistoryEnabled] = useState(false);
   const [sessionActive, setSessionActive] = useState<boolean | null>(null);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+
+  // Dev-only hook so the Debug overlay's wake-glow button can flip the
+  // chromatic ring on without an SSE round-trip. Pure UI preview; does
+  // not send anything to the glasses or server. The glow stays in the set
+  // state indefinitely — no auto-revert — so it survives toggle taps.
+  useEffect(() => {
+    const w = window as Window;
+    w.__setDevWakeWord = (on: boolean) => setWakeWordActive(on);
+    return () => {
+      delete w.__setDevWakeWord;
+    };
+  }, []);
   const [currentPage, setCurrentPage] = useState<'chat' | 'settings'>('chat');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -209,7 +226,7 @@ function ChatInterface({ userId, recipientId, onEnableDebugMode }: ChatInterface
   // Load user settings on mount
   useEffect(() => {
     if (userId) {
-      fetchUserSettings(userId)
+      fetchUserSettings(frontendToken)
         .then((settings) => {
           setChatHistoryEnabled(settings.chatHistoryEnabled ?? false);
         })
@@ -217,11 +234,14 @@ function ChatInterface({ userId, recipientId, onEnableDebugMode }: ChatInterface
           console.error('[ChatInterface] Failed to fetch user settings:', error);
         });
     }
-  }, [userId]);
+  }, [userId, frontendToken]);
 
-  // Set up SSE connection for real-time updates (with auto-reconnect)
+  // Set up SSE connection for real-time updates (with auto-reconnect).
+  // Wait for the frontend token before connecting; otherwise the stream
+  // hits a 401 immediately and triggers the reconnect loop while
+  // useMentraAuth() is still resolving.
   useEffect(() => {
-    if (!userId || !recipientId) {
+    if (!userId || !recipientId || !frontendToken) {
       return;
     }
 
@@ -230,7 +250,10 @@ function ChatInterface({ userId, recipientId, onEnableDebugMode }: ChatInterface
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
     const connect = () => {
-      const sseUrl = `/api/chat/stream?userId=${encodeURIComponent(userId)}&recipientId=${encodeURIComponent(recipientId)}`;
+      const sseUrl = withAuthSseUrl(
+        `/api/chat/stream?recipientId=${encodeURIComponent(recipientId)}`,
+        frontendToken,
+      );
       const eventSource = new EventSource(sseUrl);
       sseRef.current = eventSource;
 
@@ -274,12 +297,15 @@ function ChatInterface({ userId, recipientId, onEnableDebugMode }: ChatInterface
                 },
               ]);
             }
+          } else if (data.type === 'wake_word') {
+            setWakeWordActive(true);
           } else if (data.type === 'processing') {
             const randomWord = THINKING_WORDS[Math.floor(Math.random() * THINKING_WORDS.length)];
             setThinkingWord(randomWord);
             setIsProcessing(true);
           } else if (data.type === 'idle') {
             setIsProcessing(false);
+            setWakeWordActive(false);
           } else if (data.type === 'connected') {
             // SSE connected — waiting for history
             setIsLoadingHistory(true);
@@ -353,7 +379,7 @@ function ChatInterface({ userId, recipientId, onEnableDebugMode }: ChatInterface
       if (reconnectTimer) clearTimeout(reconnectTimer);
       sseRef.current?.close();
     };
-  }, [userId, recipientId]);
+  }, [userId, recipientId, frontendToken]);
 
   // Render Settings page if on settings
   if (currentPage === 'settings') {
@@ -362,7 +388,6 @@ function ChatInterface({ userId, recipientId, onEnableDebugMode }: ChatInterface
         onBack={() => setCurrentPage('chat')}
         isDarkMode={isDarkMode}
         onToggleDarkMode={() => setIsDarkMode(!isDarkMode)}
-        userId={userId}
         onChatHistoryToggle={(enabled) => setChatHistoryEnabled(enabled)}
         onEnableDebugMode={onEnableDebugMode}
       />
@@ -393,12 +418,15 @@ function ChatInterface({ userId, recipientId, onEnableDebugMode }: ChatInterface
         )}
       </AnimatePresence>
 
+      {/* RGB Glow Border */}
+      <ChromaticBorder state={wakeWordActive ? "active" : "idle"} />
+
       {/* Main Chat Content */}
       <motion.div
-        className="flex-1 flex flex-col relative"
+        className="flex-1 flex flex-col relative "
         initial={{ x: 0 }}
         animate={{ x: 0 }}
-        style={{ backgroundColor: 'var(--background)' }}
+        style={{ backgroundColor: 'transparent' }}
       >
         {/* Header */}
         <Header
