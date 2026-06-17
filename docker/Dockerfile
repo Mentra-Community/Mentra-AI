@@ -1,4 +1,6 @@
-FROM oven/bun:latest
+# Pinned (not :latest) — a floating Bun pulled in 1.3.14, which crashes on
+# bson's node:v8 isBuildingSnapshot() call. Bump deliberately after testing.
+FROM oven/bun:1.3.10
 WORKDIR /app
 
 # Copy package files and install dependencies

@@ -395,6 +395,10 @@ export class TranscriptionManager {
    */
   private playStartSound(): void {
     if (!START_SOUND_URL || !this.user.appSession) return;
+    // Don't play the activation cue on display glasses — they have no speakers
+    // and get visual feedback (live transcription HUD) instead. The audio cue
+    // is only for camera-only glasses.
+    if (this.user.appSession.capabilities?.hasDisplay) return;
     this.user.appSession.audio.playAudio({ audioUrl: START_SOUND_URL }).catch((err) => {
       console.debug('Start listening sound failed:', err);
     });
